@@ -63,11 +63,14 @@
 
   /* ---------- 効果音 ---------- */
   var actx = null;
-  function tone(freq, start, dur, type, vol) {
+  // freq2 を渡すと、freq から freq2 へ音程がすべる
+  function tone(freq, start, dur, type, vol, freq2) {
     var o = actx.createOscillator(), g = actx.createGain(), t0 = actx.currentTime + start;
     o.type = type; o.frequency.setValueAtTime(freq, t0);
+    if (freq2) o.frequency.exponentialRampToValueAtTime(freq2, t0 + dur);
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.015);
+    g.gain.setValueAtTime(vol, t0 + dur - 0.04);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     o.connect(g); g.connect(actx.destination);
     o.start(t0); o.stop(t0 + dur + 0.05);
@@ -81,8 +84,9 @@
       if (actx.state === 'suspended') actx.resume();
       if (ok) { // ピンポン
         tone(880, 0, 0.35, 'sine', 0.22); tone(1320, 0.14, 0.5, 'sine', 0.22);
-      } else {  // ブー
-        tone(180, 0, 0.5, 'sawtooth', 0.12); tone(150, 0.02, 0.5, 'square', 0.08);
+      } else {  // ブッ、ブーッ(濁った低い音を2回。2つ目は長く沈む)
+        tone(230, 0, 0.16, 'sawtooth', 0.16); tone(163, 0, 0.16, 'square', 0.12);
+        tone(230, 0.22, 0.6, 'sawtooth', 0.16, 120); tone(163, 0.22, 0.6, 'square', 0.12, 85);
       }
     } catch (e) { /* 音が出なくても続ける */ }
   }
