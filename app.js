@@ -12,6 +12,9 @@
   var fieldById = {};
   FIELDS.forEach(function (f) { fieldById[f.id] = f; });
   QS.forEach(function (q, i) { q.id = i; });
+  var PLAIN = QS.filter(function (q) { return !q.jitsu; });   // 学科の問題(実技の事例は別枠)
+  var CASES = window.CASES || [];
+  function caseQs(cid) { return QS.filter(function (q) { return q.jitsu && q.cid === cid; }); }
 
   /* ---------- 保存(ブラウザの localStorage。使えないときもエラーにしない) ---------- */
   var mem = null;
@@ -75,6 +78,21 @@
     o.connect(g); g.connect(actx.destination);
     o.start(t0); o.stop(t0 + dur + 0.05);
   }
+  // ふんわり揺れる音(ビブラート付き)。かわいい「しょぼん」用
+  function wobble(freq, start, dur, vol, freq2) {
+    var o = actx.createOscillator(), g = actx.createGain(), lfo = actx.createOscillator(), lg = actx.createGain();
+    var t0 = actx.currentTime + start;
+    o.type = 'sine'; o.frequency.setValueAtTime(freq, t0);
+    if (freq2) o.frequency.exponentialRampToValueAtTime(freq2, t0 + dur);
+    lfo.frequency.value = 9; lg.gain.value = freq * 0.025;
+    lfo.connect(lg); lg.connect(o.frequency);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
+    g.gain.setValueAtTime(vol, t0 + dur * 0.55);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t0); lfo.start(t0); o.stop(t0 + dur + 0.05); lfo.stop(t0 + dur + 0.05);
+  }
   function playSfx(ok) {
     if (load().mute) return;
     try {
@@ -84,9 +102,11 @@
       if (actx.state === 'suspended') actx.resume();
       if (ok) { // ピンポン
         tone(880, 0, 0.35, 'sine', 0.22); tone(1320, 0.14, 0.5, 'sine', 0.22);
-      } else {  // ブッ、ブーッ(濁った低い音を2回。2つ目は長く沈む)
-        tone(230, 0, 0.16, 'sawtooth', 0.16); tone(163, 0, 0.16, 'square', 0.12);
-        tone(230, 0.22, 0.6, 'sawtooth', 0.16, 120); tone(163, 0.22, 0.6, 'square', 0.12, 85);
+      } else {  // ぴょこん ↘ ふにゃ〜(やわらかい高めの音が、ぴょんと跳ねてしょぼんと下がる)
+        tone(740, 0, 0.09, 'triangle', 0.2, 880);          // ぴょ
+        wobble(587, 0.1, 0.18, 0.24, 523);                  // しょ
+        wobble(466, 0.3, 0.55, 0.24, 311);                  // ぼ〜ん(ゆらゆら下がる)
+        tone(1568, 0.1, 0.06, 'sine', 0.05, 1760);          // きらっと小さな高音(かわいさの味付け)
       }
     } catch (e) { /* 音が出なくても続ける */ }
   }
@@ -111,6 +131,12 @@
     if (q.tf) return { q: q, labels: ['○(正しい)', '×(誤り)'], correct: q.a ? 0 : 1 };
     var order = shuffle([0, 1, 2, 3]);
     return { q: q, labels: order.map(function (i) { return q.c[i]; }), correct: order.indexOf(0) };
+  }
+
+  // 実技の事例文(問題・解説の上に表示)
+  function ctxBox(q) {
+    if (!q.jitsu) return null;
+    return h('div', { class: 'ctx' }, [h('div', { class: 'ctitle' }, ['📋 事例:' + q.ctitle]), h('div', { class: 'ctext' }, [q.ctx])]);
   }
 
   function startRun(opts) {
@@ -138,8 +164,9 @@
     var card = h('div', { class: 'card' });
     card.appendChild(h('div', null, [
       h('span', { class: 'tag' }, [fieldById[q.f].name]),
-      h('span', { class: 'tag tf' }, [q.tf ? '○×' : '4択'])
+      h('span', { class: 'tag tf' }, [q.jitsu ? '実技' : q.tf ? '○×' : '4択'])
     ]));
+    if (q.jitsu) card.appendChild(ctxBox(q));
     card.appendChild(h('div', { class: 'qtext' }, [q.q]));
     var list = h('div', { class: 'choices' + (q.tf ? ' tfgrid' : '') });
     it.labels.forEach(function (label, i) {
@@ -187,6 +214,7 @@
 
     var card = h('div', { class: 'card' });
     card.appendChild(h('span', { class: 'tag' }, [fieldById[q.f].name]));
+    if (q.jitsu) card.appendChild(ctxBox(q));
     card.appendChild(h('div', { class: 'qtext' }, [q.q]));
     var list = h('div', { class: 'choices' + (q.tf ? ' tfgrid' : '') });
     it.labels.forEach(function (label, i) {
@@ -306,6 +334,7 @@
         var mine = x.pick == null ? '未回答' : x.it.labels[x.pick];
         rv.appendChild(h('div', { class: 'review' }, [
           h('span', { class: 'tag' }, [fieldById[q.f].short]),
+          q.jitsu ? h('details', { class: 'rv' }, [h('summary', null, ['事例を見る']), ctxBox(q)]) : null,
           h('div', { class: 'qtext' }, [q.q]),
           h('div', { class: 'ans' }, [h('span', { class: 'mine' }, ['あなたの答え:' + mine])]),
           h('div', { class: 'ans' }, [h('span', { class: 'right' }, ['正解:' + x.it.labels[x.it.correct]])]),
@@ -349,7 +378,7 @@
 
   /* ---------- ホーム ---------- */
   function fieldStat(id) {
-    var qs = QS.filter(function (q) { return q.f === id; });
+    var qs = PLAIN.filter(function (q) { return q.f === id; });
     var tried = 0, right = 0, wrong = 0;
     qs.forEach(function (q) {
       var r = recOf(q);
@@ -389,18 +418,38 @@
     modes.appendChild(mode('📝', '模擬試験(30問)', '6分野から5問ずつ。判定と解説は最後にまとめて。60%で合格ライン', true, function () {
       var picked = [];
       FIELDS.forEach(function (f) {
-        picked = picked.concat(shuffle(QS.filter(function (q) { return q.f === f.id; })).slice(0, MOCK_PER_FIELD));
+        picked = picked.concat(shuffle(PLAIN.filter(function (q) { return q.f === f.id; })).slice(0, MOCK_PER_FIELD));
       });
       startRun({ title: '模擬試験', mock: true, questions: shuffle(picked) });
     }));
     modes.appendChild(mode('🎲', 'ランダム10問', '全分野から。1問ごとに ⭕❌ の判定と解説', false, function () {
-      startRun({ title: 'ランダム10問', questions: shuffle(QS).slice(0, 10) });
+      startRun({ title: 'ランダム10問', questions: shuffle(PLAIN).slice(0, 10) });
     }));
     modes.appendChild(mode('🔁', '間違えた問題を復習(' + wrongs.length + '問)',
       wrongs.length ? '前回まちがえた問題だけ。正解すると復習リストから消えます' : 'まちがえた問題がたまるとここで復習できます', false, function () {
         startRun({ title: '間違えた問題の復習', questions: shuffle(wrongs) });
       }, !wrongs.length));
     wrap.appendChild(modes);
+
+    wrap.appendChild(h('div', { class: 'sec' }, ['実技(事例形式)']));
+    var jm = h('div', { class: 'modes' });
+    jm.appendChild(mode('📋', '実技 ランダム2事例', '事例文を読んで、続けて答える形式。1問ごとに ⭕❌ の判定と解説', false, function () {
+      var ids = shuffle(CASES.map(function (c, i) { return i; })).slice(0, 2), qs = [];
+      ids.forEach(function (cid) { qs = qs.concat(caseQs(cid)); });
+      startRun({ title: '実技 ランダム2事例', questions: qs });
+    }));
+    wrap.appendChild(jm);
+    var cl = h('div', { class: 'cases' });
+    CASES.forEach(function (c, cid) {
+      var qs = caseQs(cid), right = 0, wrong = 0;
+      qs.forEach(function (q) { var r = recOf(q); if (r) { if (r.last) right++; else wrong++; } });
+      cl.appendChild(h('button', { class: 'casebtn', onclick: function () { startRun({ title: '実技:' + c.title, questions: qs }); } }, [
+        h('span', { class: 'tag' }, [fieldById[c.f].short]),
+        h('b', null, [c.title]),
+        h('small', null, [right + '/' + c.n + (wrong ? ' ・復習' + wrong : '')])
+      ]));
+    });
+    wrap.appendChild(cl);
 
     wrap.appendChild(h('div', { class: 'sec' }, ['分野ごとに解く']));
     var fl = h('div', { class: 'modes' });
@@ -440,7 +489,7 @@
   // 分野を選んだあと:全問 / 未回答だけ / 苦手だけ
   function fieldMenu(id) {
     var f = fieldById[id];
-    var qs = QS.filter(function (q) { return q.f === id; });
+    var qs = PLAIN.filter(function (q) { return q.f === id; });
     var fresh = qs.filter(function (q) { return !recOf(q); });
     var wrongs = qs.filter(function (q) { var r = recOf(q); return r && r.last === false; });
 

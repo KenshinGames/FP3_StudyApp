@@ -201,3 +201,14 @@ details.rv .exp p { font-size: 14px; }
   padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
 .dock > * { max-width: 688px; margin-left: auto; margin-right: auto; }
 .dock .hint { margin-top: 4px; }
+
+/* 実技(事例形式) */
+.ctx { background: var(--brand-soft); border-radius: 12px; padding: 12px 14px; margin: 12px 0 4px; }
+.ctx .ctitle { font-size: 13px; font-weight: 700; color: var(--brand); margin-bottom: 6px; }
+.ctx .ctext { font-size: 14px; white-space: pre-wrap; line-height: 1.7; }
+.cases { display: grid; gap: 8px; }
+.casebtn { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 12px 14px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; color: var(--ink); font: inherit; }
+.casebtn:hover { border-color: var(--brand); }
+.casebtn b { flex: 1; font-size: 14px; }
+.casebtn small { color: var(--sub); font-variant-numeric: tabular-nums; white-space: nowrap; }
