@@ -301,3 +301,15 @@ details.rv .exp p { font-size: calc(14px * var(--fs)); }
   .mode:hover, .field:hover, .casebtn:hover, button.choice:hover:not([disabled]) { border-color: var(--brand); }
   .askbtn:hover { border-style: solid; }
 }
+
+/* 設定の小さいボタン・重ねる箱(ホーム画面に追加のやり方・記録の引き継ぎ) */
+.sbtn { flex: none; border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 6px 12px; font-size: 14px; }
+.dialog { max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.panel p { font-weight: 400; margin: 8px 0 0; font-size: 14px; }
+.panel .how, .install .how { color: var(--sub); font-size: 13px; }
+.panel h3 { font-size: 14px; margin: 14px 0 6px; }
+.panel .btn { margin-top: 8px; }
+.steps { margin: 6px 0 0; padding-left: 1.4em; font-size: 14px; }
+.steps li + li { margin-top: 2px; }
+textarea.code { display: block; width: 100%; resize: vertical; font: 16px/1.4 ui-monospace, Menlo, monospace; padding: 8px 10px;
+  border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); word-break: break-all; }

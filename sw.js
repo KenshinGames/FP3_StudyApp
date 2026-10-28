@@ -1,7 +1,7 @@
 /* 電波がなくても開けるように、アプリのファイルを端末に保存しておく(Service Worker)。
    ネットにつながるときは毎回新しいファイルを取りに行き(更新がすぐ届く)、届かないときだけ保存した分を使う。
    ファイルを足したら FILES にも足す。AI に質問(Worker)など、ほかのサイトへの通信には関わらない */
-var CACHE = 'fp3-v1';
+var CACHE = 'fp3-v2';
 var FILES = [
   './', 'index.html', 'style.css', 'app.js', 'questions.js', 'cases.js', 'config.js',
   'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
@@ -32,7 +32,9 @@ self.addEventListener('fetch', function (e) {
     var done = false;
     function give(r) { if (!done && r) { done = true; resolve(r); } }
     var timer = setTimeout(function () { fromCache().then(give); }, TIMEOUT_MS);
-    fetch(req).then(function (res) {
+    // HTTP のキャッシュ(GitHub Pages は 10 分)を使わず、毎回サーバーに新しいか確かめる(変わっていなければ 304 で軽い)
+    var fresh = req.mode === 'navigate' ? new Request(req.url, { cache: 'no-cache', credentials: 'same-origin', redirect: 'manual' }) : new Request(req, { cache: 'no-cache' });
+    fetch(fresh).then(function (res) {
       clearTimeout(timer);
       if (res.ok && res.type === 'basic') {
         var copy = res.clone();

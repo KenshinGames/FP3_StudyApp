@@ -882,6 +882,8 @@
         if (id === 'on') playSfx(true);
       })]),
       h('div', { class: 'srow' }, [h('span', null, ['文字の大きさ']), seg(FONT_SIZES, fontId(), setFont)]),
+      standalone() ? null : h('div', { class: 'srow' }, [h('span', null, ['ホーム画面に追加']), h('button', { class: 'sbtn', onclick: installDialog }, ['やり方を見る'])]),
+      h('div', { class: 'srow' }, [h('span', null, ['記録の引き継ぎ']), h('button', { class: 'sbtn', onclick: transferDialog }, ['コピー / 読み込み'])]),
       h('div', { class: 'srow' }, [h('button', { class: 'linkbtn', onclick: function () {
         ask('学習の記録(解いた結果・途中の問題)をすべて消しますか?★と設定は残ります。', '消す', function () {
           var s = load(); s.q = {}; delete s.run; save(); home(window.scrollY);
@@ -1002,33 +1004,148 @@
   }
 
   /* ---------- ホーム画面に追加(アプリのように全画面で開く・電波がなくても解ける) ---------- */
-  var installEvt = null;   // Android の Chrome などで「インストール」を出すためのイベント
+  // iPhone の Chrome などでは「ホーム画面に追加」が出ない版があるので、Safari で開き直す手順を出す
+  var installEvt = null;   // Android の Chrome・パソコンの Chrome / Edge で「インストール」を出すためのイベント
   function standalone() {
     return navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
   }
-  function isIOS() {
-    return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  // 'ios-safari' / 'ios-other'(iPhone の Chrome・Edge・Firefox・LINE など)/ 'android' / 'desktop'
+  function platform() {
+    var ua = navigator.userAgent;
+    if (/iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+      return /CriOS|FxiOS|EdgiOS|OPiOS|GSA\/|Line\/|FBAN|FBAV|Instagram/.test(ua) ? 'ios-other' : 'ios-safari';
+    }
+    return /Android/.test(ua) ? 'android' : 'desktop';
   }
+  function browserName() {
+    var ua = navigator.userAgent;
+    return /CriOS/.test(ua) ? 'Chrome' : /EdgiOS/.test(ua) ? 'Edge' : /FxiOS/.test(ua) ? 'Firefox' : /Line\//.test(ua) ? 'LINE' : 'このブラウザ';
+  }
+  function appUrl() { return location.origin + location.pathname; }
+
+  // クリップボードにコピー(使えないときは選択してコピーを試す)。done(できたか)
+  function copyText(text, done) {
+    function fallback() {
+      var t = h('textarea', { readonly: true, style: 'position:fixed;top:0;left:0;opacity:0' });
+      t.value = text;
+      document.body.appendChild(t);
+      t.select(); t.setSelectionRange(0, text.length);
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { /* できなければ false */ }
+      t.remove();
+      done(ok);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { done(true); }, fallback);
+    else fallback();
+  }
+  function copyButton(label, text) {
+    var b = h('button', { class: 'btn', onclick: function () {
+      copyText(text(), function (ok) { b.textContent = ok ? 'コピーしました ✓' : 'コピーできませんでした'; });
+    } }, [label]);
+    return b;
+  }
+
+  // 追加のしかた(端末・ブラウザごと)。ホームの案内と、設定の「やり方を見る」で使う
+  function installHow() {
+    var p = platform();
+    var share = '「共有」ボタン(□に↑。見当たらなければ「…」の中)→「ホーム画面に追加」→「追加」';
+    if (installEvt) {
+      return [h('button', { class: 'btn main', onclick: function () {
+        installEvt.prompt();
+        installEvt.userChoice.then(function () { installEvt = null; if (screen === 'home') home(window.scrollY); });
+      } }, [p === 'desktop' ? 'アプリとしてインストール' : 'ホーム画面に追加'])];
+    }
+    if (p === 'ios-safari') return [h('p', { class: 'how' }, [share])];
+    if (p === 'ios-other') {
+      return [
+        h('p', { class: 'how' }, [(browserName() === 'このブラウザ' ? 'このブラウザ' : 'iPhone の ' + browserName() + ' ') + 'では「ホーム画面に追加」が出ないことがあります。Safari で開くのが確実です。']),
+        h('ol', { class: 'steps' }, [
+          h('li', null, ['下のボタンでアドレスをコピー']),
+          h('li', null, ['Safari を開いて、アドレス欄に貼り付けて開く']),
+          h('li', null, [share])
+        ]),
+        copyButton('アドレスをコピー', appUrl),
+        browserName() === 'Chrome' ? h('p', { class: 'how' }, ['(Chrome のままなら、アドレスバー右の共有ボタン → 一覧の下のほうの「ホーム画面に追加」。ない版もあります)']) : null
+      ];
+    }
+    if (p === 'android') return [h('p', { class: 'how' }, ['右上のメニュー(︙)→「ホーム画面に追加」または「アプリをインストール」'])];
+    return [h('p', { class: 'how' }, ['スマホで開いて追加してください。パソコンの Chrome / Edge は、アドレスバー右のインストールのボタンからも入れられます。'])];
+  }
+  var RECORD_NOTE = 'ホーム画面のアプリは、ブラウザとは記録の保存場所が別です。今までの記録は、設定の「記録の引き継ぎ」で移せます。';
   function installCard() {
-    if (standalone() || load().pwaHint || (!installEvt && !isIOS())) return null;
+    if (standalone() || load().pwaHint || (platform() === 'desktop' && !installEvt)) return null;
     var card = h('div', { class: 'card install' }, [
       h('div', { class: 'rtop' }, [h('b', null, ['📲 ホーム画面に追加しよう']), h('span', { class: 'grow' }),
         h('button', { class: 'back', 'aria-label': 'この案内を閉じる', onclick: function () { load().pwaHint = 1; save(); card.remove(); } }, ['✕'])]),
-      h('p', null, ['アプリのように全画面で開けて、電波がなくても問題を解けます(AIに質問はネットが必要)。']),
-      installEvt
-        ? h('button', { class: 'btn main', onclick: function () {
-          installEvt.prompt();
-          installEvt.userChoice.then(function () { installEvt = null; home(window.scrollY); });
-        } }, ['ホーム画面に追加'])
-        : h('p', { class: 'how' }, ['ブラウザの「共有」ボタン(□に↑。見当たらなければ「…」の中)→「ホーム画面に追加」'])
-    ]);
+      h('p', null, ['アプリのように全画面で開けて、電波がなくても問題を解けます(AIに質問はネットが必要)。'])
+    ].concat(installHow(), [h('p', { class: 'how' }, [RECORD_NOTE])]));
     return card;
+  }
+  // 画面の上に重ねる箱(閉じるボタンつき)
+  function panel(title, kids) {
+    var ov = h('div', { class: 'overlay', onclick: function (e) { if (e.target === ov) ov.remove(); } }, [
+      h('div', { class: 'dialog panel', role: 'dialog', 'aria-label': title }, [
+        h('div', { class: 'rtop' }, [h('b', null, [title]), h('span', { class: 'grow' }),
+          h('button', { class: 'back', 'aria-label': '閉じる', onclick: function () { ov.remove(); } }, ['✕'])])
+      ].concat(kids))
+    ]);
+    document.body.appendChild(ov);
+    return ov;
+  }
+  function installDialog() {
+    panel('📲 ホーム画面に追加', [h('p', null, ['アプリのように全画面で開けて、電波がなくても問題を解けます。'])]
+      .concat(installHow(), [h('p', { class: 'how' }, [RECORD_NOTE])]));
   }
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
     installEvt = e;
     if (screen === 'home') home(window.scrollY);
   });
+
+  /* ---------- 記録の引き継ぎ(ブラウザ ⇄ ホーム画面のアプリ・ほかの端末へ。コードをコピーして貼り付ける) ---------- */
+  var CODE_HEAD = 'FP3REC1:';
+  function exportCode() {
+    var s = load();
+    var json = JSON.stringify({ q: s.q, star: s.star || {} });
+    return CODE_HEAD + btoa(unescape(encodeURIComponent(json)));
+  }
+  // 読み込んだ記録を今の記録に足す(同じ問題は、解いた回数の多いほう)。読み込めなければ -1、それ以外は更新した問題数
+  function importCode(text) {
+    var m = String(text || '').replace(/\s+/g, ''), at = m.indexOf(CODE_HEAD), d = null;
+    if (at < 0) return -1;
+    try { d = JSON.parse(decodeURIComponent(escape(atob(m.slice(at + CODE_HEAD.length))))); } catch (e) { return -1; }
+    if (!d || typeof d.q !== 'object' || !d.q) return -1;
+    var s = load(), n = 0;
+    Object.keys(d.q).forEach(function (id) {
+      var a = d.q[id], b = s.q[id];
+      if (!QS[id] || !a || typeof a.r !== 'number' || typeof a.w !== 'number') return;
+      if (!b || a.r + a.w > b.r + b.w) { s.q[id] = { r: a.r, w: a.w, last: typeof a.last === 'boolean' ? a.last : null }; n++; }
+    });
+    s.star = s.star || {};
+    Object.keys(d.star || {}).forEach(function (id) { if (QS[id] && !s.star[id]) { s.star[id] = 1; n++; } });
+    save();
+    return n;
+  }
+  function transferDialog() {
+    var input = h('textarea', { class: 'code', rows: '3', placeholder: 'ここにコードを貼り付け' });
+    var msg = h('p', { class: 'how' });
+    var solved = Object.keys(load().q).length;
+    var ov = panel('🔁 記録の引き継ぎ', [
+      h('p', { class: 'how' }, ['ブラウザとホーム画面のアプリ(Chrome と Safari も)は、記録の保存場所が別です。元のほうで「コピー」→ 移したいほうでこの画面を開いて貼り付け →「読み込む」。']),
+      h('h3', null, ['① この記録をコピー(解いた問題 ' + solved + '問)']),
+      copyButton('記録のコードをコピー', exportCode),
+      h('h3', null, ['② コピーしたコードを読み込む']),
+      input,
+      h('button', { class: 'btn main', onclick: function () {
+        var n = importCode(input.value);
+        if (n < 0) { msg.textContent = '読み込めませんでした。コピーしたコードを、そのまま全部貼り付けてください。'; return; }
+        ov.remove();
+        home(window.scrollY);
+        panel('🔁 記録の引き継ぎ', [h('p', null, [n ? '読み込みました(' + n + '件を更新)。' : 'この端末の記録のほうが新しいので、変わったところはありませんでした。'])]);
+      } }, ['読み込む']),
+      msg
+    ]);
+  }
 
   // 電波がなくても開けるように、アプリのファイルを端末に保存しておく(sw.js)
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
