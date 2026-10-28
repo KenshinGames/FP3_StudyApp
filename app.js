@@ -1004,7 +1004,7 @@
   }
 
   /* ---------- ホーム画面に追加(アプリのように全画面で開く・電波がなくても解ける) ---------- */
-  // iPhone の Chrome などでは「ホーム画面に追加」が出ない版があるので、Safari で開き直す手順を出す
+  // iPhone の Chrome は「共有 → 表示を増やす → ホーム画面に追加」。ほかのアプリ(LINE など)は Safari で開き直す手順を出す
   var installEvt = null;   // Android の Chrome・パソコンの Chrome / Edge で「インストール」を出すためのイベント
   function standalone() {
     return navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
@@ -1056,6 +1056,7 @@
       } }, [p === 'desktop' ? 'アプリとしてインストール' : 'ホーム画面に追加'])];
     }
     if (p === 'ios-safari') return [h('p', { class: 'how' }, [share])];
+    if (p === 'ios-other' && browserName() === 'Chrome') return [h('p', { class: 'how' }, ['「共有」ボタン(□に↑)→「表示を増やす」→「ホーム画面に追加」'])];
     if (p === 'ios-other') {
       return [
         h('p', { class: 'how' }, [(browserName() === 'このブラウザ' ? 'このブラウザ' : 'iPhone の ' + browserName() + ' ') + 'では「ホーム画面に追加」が出ないことがあります。Safari で開くのが確実です。']),
@@ -1064,8 +1065,7 @@
           h('li', null, ['Safari を開いて、アドレス欄に貼り付けて開く']),
           h('li', null, [share])
         ]),
-        copyButton('アドレスをコピー', appUrl),
-        browserName() === 'Chrome' ? h('p', { class: 'how' }, ['(Chrome のままなら、アドレスバー右の共有ボタン → 一覧の下のほうの「ホーム画面に追加」。ない版もあります)']) : null
+        copyButton('アドレスをコピー', appUrl)
       ];
     }
     if (p === 'android') return [h('p', { class: 'how' }, ['右上のメニュー(︙)→「ホーム画面に追加」または「アプリをインストール」'])];
