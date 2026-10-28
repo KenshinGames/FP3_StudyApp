@@ -6,9 +6,12 @@
   var FIELDS = window.FIELDS;
   var STORE_KEY = 'fp3study.v1';
   var MOCK_PER_FIELD = 5;   // 模擬試験:各分野から出す問題数(合計 30 問)
+  var HONBAN_PER_FIELD = 10;  // 本番形式の模擬試験:各分野から出す問題数(合計 60 問)
+  var HONBAN_MINUTES = 90;    // 本番形式の制限時間(分)。学科本試験と同じ
   var PASS_RATE = 0.6;      // 学科試験の合格基準は 60%(36 / 60 問)
   var TODAY_COUNT = 10;     // 今日の10問
-  var TODAY_WRONG = 4;      // 今日の10問に先に入れる「まちがえた問題」の数
+  var REVIEW_STEPS = [1, 3, 7, 14, 30];   // 復習の間隔(日):正解するごとに伸びる。まちがえたら翌日
+  var DAY_MS = 86400000;
 
   var root = document.getElementById('app');
   var fieldById = {};
@@ -19,7 +22,7 @@
   function caseQs(cid) { return QS.filter(function (q) { return q.jitsu && q.cid === cid; }); }
 
   /* ---------- 保存(ブラウザの localStorage。使えないときもエラーにしない) ---------- */
-  // { q: {問題id: {r, w, last}}, run: 途中の問題, star: {問題id: 1}, mute, font, ai, pwaHint }
+  // { q: {問題id: {r, w, last, step, due}}, run: 途中の問題, star: {問題id: 1}, mute, font, ai, pwaHint }
   var mem = null;
   function load() {
     if (mem) return mem;
@@ -33,13 +36,33 @@
   function record(q, correct) {
     var s = load();
     var r = s.q[q.id] || { r: 0, w: 0, last: null };
-    if (correct) r.r++; else r.w++;
+    if (correct) {
+      r.r++;
+      r.step = Math.min((typeof r.step === 'number' ? r.step : -1) + 1, REVIEW_STEPS.length - 1);
+    } else {
+      r.w++;
+      r.step = -1;
+    }
     r.last = correct;
+    r.due = Date.now() + (correct ? REVIEW_STEPS[r.step] : 1) * DAY_MS;   // 次に復習する日
     s.q[q.id] = r;
     save();
   }
   function recOf(q) { return load().q[q.id] || null; }
   function wrongList() { return QS.filter(function (q) { var r = recOf(q); return r && r.last === false; }); }
+  // 復習の期限が来ているか(旧データで due がない問題は、期限が来たものとして扱う)
+  function isDue(q) {
+    var r = recOf(q);
+    return !!r && (typeof r.due !== 'number' || r.due <= Date.now());
+  }
+  function dueOf(q) { var r = recOf(q); return r && typeof r.due === 'number' ? r.due : 0; }
+  // 解説に出す「次回の復習は〜」
+  function dueText(q) {
+    var r = recOf(q);
+    if (!r || typeof r.due !== 'number') return null;
+    var days = Math.max(1, Math.round((r.due - Date.now()) / DAY_MS));
+    return days <= 1 ? '明日' : days + '日後';
+  }
 
   // ★(あとで見直す)
   function isStar(q) { return !!(load().star || {})[q.id]; }
@@ -147,6 +170,26 @@
       }
     } catch (e) { /* 音が出なくても続ける */ }
   }
+  /* ---------- 本番形式のタイマー ---------- */
+  var timerId = null;
+  function fmtTime(sec) { var m = Math.floor(sec / 60), s = sec % 60; return m + ':' + (s < 10 ? '0' : '') + s; }
+  function stopTimer() { if (timerId) { clearInterval(timerId); timerId = null; } }
+  function startTimer() {
+    stopTimer();
+    if (!run || !run.endsAt) return;
+    var el = document.getElementById('fx-timer');
+    if (!el) return;
+    function tick() {
+      if (!run || !run.endsAt) { stopTimer(); return; }
+      var left = Math.max(0, Math.round((run.endsAt - Date.now()) / 1000));
+      el.textContent = '⏱ ' + fmtTime(left);
+      if (left <= 300) el.style.color = '#d33';
+      if (left <= 0) { stopTimer(); run.timeUp = true; finish(); }
+    }
+    tick();
+    timerId = setInterval(tick, 1000);
+  }
+
   // 画面いっぱいに ⭕ / ❌ をぱっと出す
   function flashMark(ok) {
     var el = h('div', { class: 'flash ' + (ok ? 'ok' : 'ng'), 'aria-hidden': 'true' }, [h('span', null, [ok ? '⭕' : '❌'])]);
@@ -431,7 +474,8 @@
     load().run = {
       t: run.title, m: run.mock ? 1 : 0, i: run.i, p: run.picks,
       ids: run.items.map(function (it) { return it.q.id; }),
-      o: run.items.map(function (it) { return it.o || null; })
+      o: run.items.map(function (it) { return it.o || null; }),
+      e: run.endsAt || 0, l: run.limit || 0
     };
     save();
   }
@@ -446,12 +490,14 @@
     if (!s) return false;
     run = {
       title: s.t, mock: !!s.m, i: Math.min(s.i || 0, s.ids.length - 1), picks: (s.p || []).slice(), ctxOpen: {},
+      limit: s.l || 0, endsAt: s.e || 0,
       items: s.ids.map(function (id, k) { return prepare(QS[id], s.o && s.o[k]); })
     };
     return true;
   }
   // 出題をいったん離れる(答えは保存したまま。1 問も答えていなければ消す)
   function suspend() {
+    stopTimer();
     if (run && !answeredIn(run.picks)) clearSaved();
     run = null;
     setKeys(null);
@@ -498,6 +544,8 @@
     run = {
       title: opts.title,
       mock: !!opts.mock,
+      limit: opts.timed || 0,
+      endsAt: opts.timed ? Date.now() + opts.timed * 1000 : 0,
       items: qs.map(function (q) { return prepare(q); }),
       i: 0,
       picks: [],
@@ -518,12 +566,14 @@
 
   function header() {
     var fs = h('button', { class: 'fsbtn', 'aria-label': '文字の大きさを変える', onclick: function () { cycleFont(); fs.textContent = '文字:' + fontName(); } }, ['文字:' + fontName()]);
-    return h('div', { class: 'qhead' }, [
+    var kids = [
       h('button', { class: 'back', onclick: quit }, ['← やめる']),
-      h('div', { class: 'grow' }),
-      fs,
-      h('div', { class: 'qcount' }, [(run.i + 1) + ' / ' + run.items.length])
-    ]);
+      h('div', { class: 'grow' })
+    ];
+    if (run && run.endsAt) kids.push(h('span', { class: 'qcount', id: 'fx-timer' }, ['⏱ ' + fmtTime(Math.max(0, Math.round((run.endsAt - Date.now()) / 1000)))]));
+    kids.push(fs);
+    kids.push(h('div', { class: 'qcount' }, [(run.i + 1) + ' / ' + run.items.length]));
+    return h('div', { class: 'qhead' }, kids);
   }
 
   // 問題の画面:答えを選ぶと、そのたびに解説ページ(showExplanation)へ進む。模擬試験は前後に動ける
@@ -574,6 +624,7 @@
       wrap.appendChild(h('div', { class: 'hint keyhint' }, [keys]));
     }
     mount(wrap, y);
+    startTimer();
 
     setKeys(function (e) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -607,6 +658,8 @@
     wrap.appendChild(card);
 
     wrap.appendChild(h('div', { class: 'card exp' }, [h('h3', null, ['解説']), h('p', null, [q.e]), askButton(it, picked)]));
+    var nxt = dueText(q);
+    if (nxt) wrap.appendChild(h('div', { class: 'hint' }, ['🔁 次回の復習は ' + nxt + '(今日の10問に出てきます)']));
     // 画面下に固定(解説が長くてスクロールしても動かない)
     wrap.classList.add('has-dock');
     wrap.appendChild(h('div', { class: 'dock' }, [
@@ -685,6 +738,7 @@
 
   /* ---------- 結果 ---------- */
   function finish() {
+    stopTimer();
     setKeys(null);
     screen = 'result';
     var items = run.items;
@@ -701,7 +755,8 @@
       h('div', { class: 'big' }, [String(right), h('small', null, [' / ' + total + '問'])]),
       h('div', null, ['正答率 ' + pct(right, total) + '%']),
       h('div', { class: 'judge ' + (rate >= PASS_RATE ? 'pass' : 'fail') },
-        [rate >= PASS_RATE ? '合格ライン(60%)クリア!' : 'あと ' + (Math.ceil(total * PASS_RATE) - right) + '問で合格ライン(60%)'])
+        [rate >= PASS_RATE ? '合格ライン(60%)クリア!' : 'あと ' + (Math.ceil(total * PASS_RATE) - right) + '問で合格ライン(60%)']),
+      run.timeUp ? h('div', null, ['⏱ 制限時間になりました']) : null
     ]));
 
     // 分野ごと
@@ -769,7 +824,7 @@
         startRun({ title: '間違えた問題をやり直す', questions: miss.map(function (x) { return x.it.q; }) });
       } }, ['間違えた問題だけ、もう一度']) : null,
       h('button', { class: 'btn' + (miss.length ? '' : ' main'), onclick: function () {
-        startRun({ title: again.title, mock: again.mock, questions: again.items.map(function (it) { return it.q; }) });
+        startRun({ title: again.title, mock: again.mock, timed: again.limit || 0, questions: again.items.map(function (it) { return it.q; }) });
       } }, ['同じ問題をもう一度']),
       h('button', { class: 'btn', onclick: goHome }, ['ホームにもどる'])
     ]));
@@ -788,17 +843,19 @@
     return { total: qs.length, tried: tried, right: right, wrong: wrong };
   }
 
-  // 今日の10問:まちがえた問題を少し、まだ解いていない問題を多めに。足りなければ解いた問題から
+  // 今日の10問:復習の期限が来た問題(期限を過ぎた順)を優先し、まだ解いていない問題を足す。足りなければ解いた問題から
   function todaySet() {
-    var wrong = [], fresh = [], done = [];
+    var due = [], fresh = [], rest = [];
     shuffle(PLAIN).forEach(function (q) {
       var r = recOf(q);
-      (!r ? fresh : r.last === false ? wrong : done).push(q);
+      if (!r) fresh.push(q);
+      else if (isDue(q)) due.push(q);
+      else rest.push(q);
     });
-    var pick = wrong.slice(0, TODAY_WRONG);
+    due.sort(function (a, b) { return dueOf(a) - dueOf(b); });
+    var pick = due.slice(0, TODAY_COUNT);
     pick = pick.concat(fresh.slice(0, TODAY_COUNT - pick.length));
-    pick = pick.concat(wrong.slice(TODAY_WRONG, TODAY_WRONG + TODAY_COUNT - pick.length));
-    pick = pick.concat(done.slice(0, TODAY_COUNT - pick.length));
+    pick = pick.concat(rest.slice(0, TODAY_COUNT - pick.length));
     return shuffle(pick);
   }
 
@@ -812,6 +869,7 @@
       if (r) { tried++; answers += r.r + r.w; correctAnswers += r.r; }
     });
     var wrongs = wrongList();
+    var dueCount = QS.filter(isDue).length;
     var stars = starList();
 
     var wrap = h('div');
@@ -830,14 +888,14 @@
       h('div', { class: 'stats' }, [
         h('div', { class: 'stat' }, [h('b', null, [tried + '/' + QS.length]), h('span', null, ['解いた問題'])]),
         h('div', { class: 'stat' }, [h('b', null, [pct(correctAnswers, answers) + '%']), h('span', null, ['通算の正答率'])]),
-        h('div', { class: 'stat' }, [h('b', null, [String(wrongs.length)]), h('span', null, ['復習が必要'])])
+        h('div', { class: 'stat' }, [h('b', null, [String(dueCount)]), h('span', null, ['復習が必要'])])
       ]),
       bar(pct(tried, QS.length))
     ]));
 
     wrap.appendChild(h('div', { class: 'sec' }, ['問題を解く']));
     var modes = h('div', { class: 'modes' });
-    modes.appendChild(mode('☀️', '今日の10問', 'まちがえた問題・まだ解いていない問題を優先して10問。1問ごとに解説', true, function () {
+    modes.appendChild(mode('☀️', '今日の10問', '復習の期限が来た問題・まだ解いていない問題を優先して10問。1問ごとに解説', true, function () {
       begin({ title: '今日の10問', questions: todaySet() });
     }));
     modes.appendChild(mode('📝', '模擬試験(30問)', '6分野から5問ずつ。判定と解説は最後にまとめて。60%で合格ライン', false, function () {
@@ -846,6 +904,13 @@
         picked = picked.concat(shuffle(PLAIN.filter(function (q) { return q.f === f.id; })).slice(0, MOCK_PER_FIELD));
       });
       begin({ title: '模擬試験', mock: true, questions: shuffle(picked) });
+    }));
+    modes.appendChild(mode('⏱', '本番形式の模擬試験(60問)', '6分野から10問ずつ。本番と同じ制限時間' + HONBAN_MINUTES + '分。判定と解説は最後にまとめて', false, function () {
+      var picked = [];
+      FIELDS.forEach(function (f) {
+        picked = picked.concat(shuffle(PLAIN.filter(function (q) { return q.f === f.id; })).slice(0, HONBAN_PER_FIELD));
+      });
+      begin({ title: '本番形式の模擬試験', mock: true, timed: HONBAN_MINUTES * 60, questions: shuffle(picked) });
     }));
     modes.appendChild(mode('🔁', '間違えた問題を復習(' + wrongs.length + '問)',
       wrongs.length ? '前回まちがえた問題だけ。正解すると復習リストから消えます' : 'まちがえた問題がたまるとここで復習できます', false, function () {
