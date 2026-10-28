@@ -1,10 +1,10 @@
 /* 電波がなくても開けるように、アプリのファイルを端末に保存しておく(Service Worker)。
    ネットにつながるときは毎回新しいファイルを取りに行き(更新がすぐ届く)、届かないときだけ保存した分を使う。
    ファイルを足したら FILES にも足す。AI に質問(Worker)など、ほかのサイトへの通信には関わらない */
-var CACHE = 'fp3-v2';
+var CACHE = 'fp3-v3';
 var FILES = [
   './', 'index.html', 'style.css', 'app.js', 'questions.js', 'cases.js', 'config.js',
-  'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
+  'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/icon-maskable-512.png'
 ];
 var TIMEOUT_MS = 4000;   // 電波が弱いとき、これだけ待っても届かなければ保存した分を出す
 
