@@ -4,5 +4,5 @@
  *   空のときは、ChatGPT か Claude が新しいタブで開き、問題と質問が入った状態になる。
  */
 window.FP3_CONFIG = {
-  CHAT_URL: ''
+  CHAT_URL: 'https://fp3-chat.rsc57rfjs6.workers.dev/chat'
 };

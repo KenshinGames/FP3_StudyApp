@@ -240,8 +240,9 @@
           if (!line.trim()) return;
           var ev = JSON.parse(line);
           if (ev.t === 'text') {
-            if (!answer) { out.classList.remove('wait'); }
-            answer += ev.v;
+            answer = (answer + ev.v).replace(/^\s+/, '');   // 先頭の空行(考える過程を消した残り)は出さない
+            if (!answer) return;
+            out.classList.remove('wait');
             out.textContent = answer.replace(/\*\*/g, '');
             list.scrollTop = list.scrollHeight;
           } else if (ev.t === 'done') stop = ev.stop;
