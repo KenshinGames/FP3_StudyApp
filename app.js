@@ -118,11 +118,17 @@
   }
 
   /* ---------- AI に質問(解説を読んでも分からないところを聞く) ---------- */
-  // 送り先は config.js の CHAT_URL(Cloudflare Worker。worker/ フォルダ)。空なら claude.ai を新しいタブで開いて聞く
+  // config.js の CHAT_URL が空(ふだん)は、ChatGPT か Claude を新しいタブで開き、問題と質問を入れた状態にする。
+  // 質問する人の無料アカウントで使うので、運営側の料金はかからない。
+  // CHAT_URL に Worker(worker/ フォルダ)を入れると、アプリの中で答えが返る(API の料金は運営側の負担)
   var CHAT_URL = (window.FP3_CONFIG && window.FP3_CONFIG.CHAT_URL) || '';
+  var AIS = [
+    { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/?q=' },   // ログインなしでも使える
+    { id: 'claude', name: 'Claude', url: 'https://claude.ai/new?q=' }      // アカウント(無料プランあり)が必要
+  ];
   var CHAT_MAX_TURNS = 12;    // 送る会話は 6 往復まで(Worker 側の上限と同じ)
   var CHAT_MAX_CHARS = 500;   // 質問 1 回の長さ(Worker 側の上限と同じ)
-  var CLAUDE_PREFILL_MAX = 1500;   // claude.ai に渡す文の長さ(URL が長くなりすぎないように)
+  var PREFILL_MAX = 1500;     // ChatGPT / Claude に渡す文の長さ(URL が長くなりすぎないように)
   var SUGGEST = ['もっとかんたんに説明して', 'ほかの選択肢はなぜ違うの?', '覚え方のコツを教えて'];
   var chats = {};             // 問題ごとの会話。ページを開いている間だけ覚えておく
 
@@ -138,15 +144,15 @@
     };
   }
 
-  // claude.ai の入力欄に入れる文(問題・答え・解説・質問)。長い解説は後ろを切る
-  function claudePrompt(p, question) {
+  // ChatGPT / Claude の入力欄に入れる文(問題・答え・解説・質問)。長い解説は後ろを切る
+  function prefillPrompt(p, question) {
     var head = 'FP3級の勉強中です。次の練習問題の解説を読みましたが、分からないところがあります。やさしく教えてください。\n\n';
     var body = (p.caseText ? '【事例】\n' + p.caseText + '\n\n' : '') + '【問題】' + p.question + '\n【選択肢】' + p.choices.join(' / ') +
       '\n【正解】' + p.correct + (p.picked ? '\n【私の答え】' + p.picked : '');
     var tail = '\n\n【質問】' + question;
-    var room = CLAUDE_PREFILL_MAX - head.length - body.length - tail.length - 10;
+    var room = PREFILL_MAX - head.length - body.length - tail.length - 10;
     var exp = room > 80 ? '\n【解説】' + (p.explanation.length > room ? p.explanation.slice(0, room) + '…' : p.explanation) : '';
-    return (head + body + exp + tail).slice(0, CLAUDE_PREFILL_MAX + 200);
+    return (head + body + exp + tail).slice(0, PREFILL_MAX + 200);
   }
 
   function openChat(it, picked) {
@@ -158,12 +164,16 @@
     var list = h('div', { class: 'chatlog', 'aria-live': 'polite' });
     var input = h('textarea', { rows: '2', maxlength: String(CHAT_MAX_CHARS), placeholder: '例:「なぜ 1/2 をかけるの?」' });
     var sendBtn = h('button', { class: 'btn main sendbtn', onclick: function () { send(input.value); } }, ['送信']);
+    // 質問の例:アプリの中で答えるときはそのまま送る。ChatGPT / Claude で聞くときは入力欄に入れる
     var chips = h('div', { class: 'chips' }, SUGGEST.map(function (t) {
-      return h('button', { class: 'chip', onclick: function () { send(t); } }, [t]);
+      return h('button', { class: 'chip', onclick: function () { if (CHAT_URL) send(t); else { input.value = t; input.focus(); } } }, [t]);
     }));
     var note = CHAT_URL
       ? 'AIの答えはまちがえることがあります。大事な数値は公式テキストで確かめてください。'
-      : '送信すると Claude(claude.ai)が新しいタブで開き、この問題と質問が入力された状態になります(Claude のアカウントが必要です)。';
+      : 'ChatGPT はログインなしでも無料で使えます。Claude は無料のアカウントが必要です。AIの答えはまちがえることがあるので、大事な数値は公式テキストで確かめてください。';
+    var aiBtns = CHAT_URL ? null : h('div', { class: 'aibtns' }, AIS.map(function (ai, i) {
+      return h('button', { class: 'btn' + (ai.id === lastAi() ? ' main' : ''), onclick: function () { openAi(ai, input.value); } }, [ai.name + 'で聞く ↗']);
+    }));
 
     function bubble(role, text) {
       var b = h('div', { class: 'msg ' + (role === 'user' ? 'me' : 'ai') }, [text]);
@@ -172,7 +182,16 @@
       return b;
     }
     log.forEach(function (m) { bubble(m.role, m.content); });
-    if (!log.length) list.appendChild(h('div', { class: 'chatempty' }, ['この問題について、分からないところを気軽に聞いてください。下のボタンからも選べます。']));
+    if (!log.length) list.appendChild(h('div', { class: 'chatempty' }, [CHAT_URL
+      ? 'この問題について、分からないところを気軽に聞いてください。下のボタンからも選べます。'
+      : '分からないところを書いて、聞きたいAIを選んでください。新しいタブで開き、この問題・正解・解説と質問が入った状態になります。\n\n下のボタンで、よくある質問を入れることもできます。']));
+
+    function lastAi() { return load().ai || 'chatgpt'; }
+    function openAi(ai, text) {
+      text = (text || '').trim().slice(0, CHAT_MAX_CHARS) || 'この問題の解説を、もっとかんたんに教えてください。';
+      window.open(ai.url + encodeURIComponent(prefillPrompt(problem, text)), '_blank', 'noopener');
+      load().ai = ai.id; save();
+    }
 
     function setBusy(b) {
       busy = b;
@@ -183,9 +202,8 @@
     function send(text) {
       text = (text || '').trim().slice(0, CHAT_MAX_CHARS);
       if (!text || busy) return;
-      if (!CHAT_URL) {
-        window.open('https://claude.ai/new?q=' + encodeURIComponent(claudePrompt(problem, text)), '_blank', 'noopener');
-        input.value = '';
+      if (!CHAT_URL) {   // Enter のときは、前回使った AI で聞く
+        openAi(AIS.filter(function (ai) { return ai.id === lastAi(); })[0] || AIS[0], text);
         return;
       }
       var empty = list.querySelector('.chatempty');
@@ -278,7 +296,8 @@
       h('div', { class: 'sheetq' }, [q.jitsu ? '事例:' + q.ctitle + ' / ' : '', q.q]),
       list,
       chips,
-      h('div', { class: 'chatform' }, [input, sendBtn]),
+      h('div', { class: 'chatform' }, CHAT_URL ? [input, sendBtn] : [input]),
+      aiBtns,
       h('div', { class: 'hint' }, [note])
     ]);
     var wrapEl = h('div', { class: 'sheet-wrap', onclick: function (e) { if (e.target === wrapEl) close(); } }, [sheet]);

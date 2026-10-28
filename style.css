@@ -241,3 +241,6 @@ details.rv .exp p { font-size: 14px; }
 .chatform textarea:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
 .sendbtn { width: auto; flex: none; padding: 0 18px; }
 .sheet .hint { margin-top: 0; }
+.aibtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.aibtns .btn { padding: 12px 8px; }
+.chatempty { white-space: pre-wrap; }
