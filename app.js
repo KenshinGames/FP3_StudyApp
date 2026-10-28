@@ -81,16 +81,47 @@
   function fontName() { return FONT_SIZES.filter(function (f) { return f.id === fontId(); })[0].name; }
   function applyFont() { document.documentElement.setAttribute('data-fs', fontId()); }
   function setFont(id) { load().font = id; save(); applyFont(); }
-  // 試験日の入力(ホームの設定)。変えたらホームを描き直してカウントダウンに反映する
+  // 試験日の入力。選んでいる最中(change)は保存だけにして、描き直しは選び終わったあと(blur)にする
+  // ※ change のたびに描き直すと、iPhone の日付ピッカーが途中で閉じて今日の日付が入ってしまうため
   function examDateInput() {
     var box = h('span', null);
-    var inp = h('input', { type: 'date', value: load().examDate || '', onchange: function () {
-      if (inp.value) load().examDate = inp.value; else delete load().examDate;
-      save(); home(window.scrollY);
-    } });
+    var inp = h('input', { type: 'date', value: load().examDate || '',
+      onchange: function () {
+        if (inp.value) load().examDate = inp.value; else delete load().examDate;
+        save();
+      },
+      onblur: function (e) {
+        if (e && e.relatedTarget && box.contains(e.relatedTarget)) return;   // クリアボタンへ移るときは描き直さない(ボタンが消えて押せなくなる)
+        home(window.scrollY);
+      }
+    });
     box.appendChild(inp);
     if (load().examDate) box.appendChild(h('button', { class: 'sbtn', onclick: function () { delete load().examDate; save(); home(window.scrollY); } }, ['クリア']));
     return box;
+  }
+
+  // 試験日のカード(「あなたの進み具合」の上に出す)。設定したら、ここにカウントダウンも出す
+  function examCard(rightLast) {
+    var kids = [h('div', { class: 'srow' }, [h('span', null, ['📅 試験日']), examDateInput()])];
+    if (load().examDate) {
+      var today0 = new Date(); today0.setHours(0, 0, 0, 0);
+      var days = Math.round((new Date(load().examDate + 'T00:00:00') - today0) / DAY_MS);
+      var examLabel = load().examDate.replace(/-/g, '/');
+      if (days > 0) {
+        var remain = QS.length - rightLast;
+        kids.push(h('div', null, [h('b', null, ['あと ' + days + ' 日']), '（' + examLabel + '）']));
+        kids.push(h('div', { class: 'hint' }, [remain > 0
+          ? '正解済みでない問題が ' + remain + ' 問。1日 ' + Math.ceil(remain / days) + ' 問ペースで全部まわります'
+          : '全問正解済み!あとは復習を回してキープしよう']));
+      } else if (days === 0) {
+        kids.push(h('div', null, [h('b', null, ['今日が試験日!']), ' がんばって！']));
+      } else {
+        kids.push(h('div', null, ['この日付は過ぎました。次の試験を受けるなら、日付を変えてね']));
+      }
+    } else {
+      kids.push(h('div', { class: 'hint' }, ['受験日を入れると、ここにカウントダウンが出ます']));
+    }
+    return h('div', { class: 'card settings' }, kids);
   }
   function cycleFont() {
     var ids = FONT_SIZES.map(function (f) { return f.id; });
@@ -880,26 +911,6 @@
       if (r) { tried++; answers += r.r + r.w; correctAnswers += r.r; if (r.last) rightLast++; }
     });
 
-    // 試験日カウントダウン(設定で試験日を入れたときだけ出す)
-    var examBox = null;
-    if (load().examDate) {
-      var today0 = new Date(); today0.setHours(0, 0, 0, 0);
-      var days = Math.round((new Date(load().examDate + 'T00:00:00') - today0) / DAY_MS);
-      var examLabel = load().examDate.replace(/-/g, '/');
-      if (days > 0) {
-        var remain = QS.length - rightLast;
-        examBox = h('div', { class: 'card' }, [
-          h('div', null, ['📅 試験日 ' + examLabel + ' まで ', h('b', null, ['あと ' + days + ' 日'])]),
-          h('div', { class: 'hint' }, [remain > 0
-            ? '正解済みでない問題が ' + remain + ' 問。1日 ' + Math.ceil(remain / days) + ' 問ペースで全部まわります'
-            : '全問正解済み!あとは復習を回してキープしよう'])
-        ]);
-      } else if (days === 0) {
-        examBox = h('div', { class: 'card' }, [h('div', null, ['📅 ', h('b', null, ['今日が試験日!']), ' がんばって！'])]);
-      } else {
-        examBox = h('div', { class: 'card' }, [h('div', null, ['📅 試験日 ' + examLabel + ' は過ぎました。次の試験を受けるなら、設定で日付を変えてね'])]);
-      }
-    }
     var wrongs = wrongList();
     var dueCount = QS.filter(isDue).length;
     var stars = starList();
@@ -915,6 +926,7 @@
     var ic = installCard();
     if (ic) wrap.appendChild(ic);
 
+    wrap.appendChild(examCard(rightLast));
     wrap.appendChild(h('div', { class: 'sec' }, ['あなたの進み具合']));
     wrap.appendChild(h('div', { class: 'card stack' }, [
       h('div', { class: 'stats' }, [
@@ -924,7 +936,6 @@
       ]),
       bar(pct(tried, QS.length))
     ]));
-    if (examBox) wrap.appendChild(examBox);
 
     wrap.appendChild(h('div', { class: 'sec' }, ['問題を解く']));
     var modes = h('div', { class: 'modes' });
@@ -986,7 +997,6 @@
     wrap.appendChild(h('div', { class: 'sec' }, ['設定']));
     var muted = !!load().mute;
     wrap.appendChild(h('div', { class: 'card settings' }, [
-      h('div', { class: 'srow' }, [h('span', null, ['試験日']), examDateInput()]),
       h('div', { class: 'srow' }, [h('span', null, ['効果音']), seg([{ id: 'on', name: 'ON' }, { id: 'off', name: 'OFF' }], muted ? 'off' : 'on', function (id) {
         load().mute = id === 'off'; save();
         if (id === 'on') playSfx(true);
