@@ -13,7 +13,10 @@
   --ng-soft: #fdecee;
   --warn-soft: #fff7e0;
   --shadow: 0 1px 2px rgba(20, 30, 60, .06), 0 4px 16px rgba(20, 30, 60, .06);
+  --fs: 1;   /* 文字の大きさ(問題文・選択肢・解説・事例・AI の答え)。設定の 小 / 中 / 大 */
 }
+:root[data-fs="s"] { --fs: .9; }
+:root[data-fs="l"] { --fs: 1.2; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #12151c;
@@ -63,7 +66,7 @@ body {
 #app {
   max-width: 720px;
   margin: 0 auto;
-  padding: 16px max(16px, env(safe-area-inset-right, 0px)) 40px max(16px, env(safe-area-inset-left, 0px));
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 40px max(16px, env(safe-area-inset-left, 0px));
 }
 h1, h2, h3 { line-height: 1.35; margin: 0; }
 button { font: inherit; color: inherit; cursor: pointer; }
@@ -94,7 +97,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: 100%; padding: 14px 16px;
   background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
 }
-.mode:hover { border-color: var(--brand); }
 .mode .ic { font-size: 26px; width: 38px; text-align: center; }
 .mode .tx { flex: 1; min-width: 0; }
 .mode .tx b { display: block; font-size: 16px; }
@@ -106,7 +108,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .field { display: block; width: 100%; text-align: left; padding: 14px 16px;
   background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
-.field:hover { border-color: var(--brand); }
 .field .top { display: flex; align-items: center; gap: 10px; }
 .field .top .ic { font-size: 22px; }
 .field .top b { font-size: 15px; flex: 1; }
@@ -123,19 +124,19 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .qhead .grow { flex: 1; }
 .qcount { font-size: 13px; color: var(--sub); font-variant-numeric: tabular-nums; }
 .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 99px; background: var(--brand-soft); color: var(--brand); }
-.tag.tf { background: var(--warn-soft); color: var(--sub); margin-left: 6px; }
-.qtext { font-size: 17px; font-weight: 600; margin: 14px 0 16px; }
+.tag.tf { background: var(--warn-soft); color: var(--sub); }
+.qtext { font-size: calc(17px * var(--fs)); font-weight: 600; margin: 14px 0 16px; }
+.qtext.sm { font-size: calc(15px * var(--fs)); margin: 10px 0 12px; }
 .choices { display: grid; gap: 10px; }
 .choice {
   display: flex; gap: 10px; align-items: flex-start; text-align: left; width: 100%;
-  padding: 12px 14px; background: var(--card); border: 2px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; background: var(--card); border: 2px solid var(--line); border-radius: 12px; font-size: calc(16px * var(--fs));
 }
-.choice:hover:not([disabled]) { border-color: var(--brand); }
 .choice .n { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--brand-soft); color: var(--brand);
   font-weight: 800; font-size: 13px; display: grid; place-items: center; margin-top: 1px; }
 .choice .t { flex: 1; }
 .choices.tfgrid { grid-template-columns: 1fr 1fr; }
-.choices.tfgrid .choice { justify-content: center; align-items: center; font-size: 18px; font-weight: 700; padding: 18px 8px; }
+.choices.tfgrid .choice { justify-content: center; align-items: center; font-size: calc(18px * var(--fs)); font-weight: 700; padding: 18px 8px; }
 .choice.ok { border-color: var(--ok); background: var(--ok-soft); }
 .choice.ok .n { background: var(--ok); color: #fff; }
 .choice.ng { border-color: var(--ng); background: var(--ng-soft); }
@@ -143,13 +144,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .choice.picked:not(.ok):not(.ng) { border-color: var(--brand); background: var(--brand-soft); }
 .choice[disabled] { cursor: default; }
 
-.verdict { margin-top: 16px; padding: 12px 14px; border-radius: 12px; font-weight: 800; font-size: 18px; }
+.verdict { padding: 2px 14px; border-radius: 99px; font-weight: 800; font-size: 20px; }
+.judged.ok { border-top: 4px solid var(--ok); }
+.judged.ng { border-top: 4px solid var(--ng); }
+.answers .choice { padding: 8px 12px; }
 .verdict.ok { background: var(--ok-soft); color: var(--ok); }
 .verdict.ng { background: var(--ng-soft); color: var(--ng); }
-.verdict small { display: block; font-weight: 500; font-size: 13px; color: var(--ink); margin-top: 2px; }
 .exp { margin-top: 12px; }
 .exp h3 { font-size: 14px; color: var(--brand); margin-bottom: 6px; }
-.exp p { margin: 0; white-space: pre-wrap; font-size: 15px; }
+.exp p { margin: 0; white-space: pre-wrap; font-size: calc(15px * var(--fs)); }
 .actions { margin-top: 16px; display: grid; gap: 10px; }
 .btn { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font-weight: 700; }
 .btn.main { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); }
@@ -166,12 +169,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .brow { display: grid; grid-template-columns: 7.5em 1fr 3.4em; gap: 8px; align-items: center; font-size: 13px; }
 .brow span:last-child { text-align: right; font-variant-numeric: tabular-nums; color: var(--sub); }
 .review { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
-.review .qtext { font-size: 15px; margin: 6px 0 8px; }
+.review .qtext { font-size: calc(15px * var(--fs)); margin: 6px 0 8px; }
 .review .ans { font-size: 14px; }
 .review .ans .mine { color: var(--ng); }
 .review .ans .right { color: var(--ok); font-weight: 700; }
 details.rv > summary { cursor: pointer; color: var(--brand); font-size: 14px; font-weight: 700; margin-top: 8px; }
-details.rv .exp p { font-size: 14px; }
+details.rv .exp p { font-size: calc(14px * var(--fs)); }
 .empty { text-align: center; color: var(--sub); padding: 30px 10px; }
 
 /* 確認ボックス */
@@ -181,8 +184,6 @@ details.rv .exp p { font-size: 14px; }
   padding: 20px 16px 16px; width: 100%; max-width: 380px; }
 .dialog p { margin: 0; font-weight: 600; }
 
-.verdict.big { font-size: 26px; text-align: center; padding: 18px 14px; }
-.verdict.big small { font-size: 14px; font-weight: 600; }
 .exp.card h3 { margin-bottom: 8px; }
 
 /* ⭕ / ❌ のフラッシュ */
@@ -203,20 +204,23 @@ details.rv .exp p { font-size: 14px; }
 .dock .hint { margin-top: 4px; }
 
 /* 実技(事例形式) */
-.ctx { background: var(--brand-soft); border-radius: 12px; padding: 12px 14px; margin: 12px 0 4px; }
-.ctx .ctitle { font-size: 13px; font-weight: 700; color: var(--brand); margin-bottom: 6px; }
-.ctx .ctext { font-size: 14px; white-space: pre-wrap; line-height: 1.7; }
+.ctx { background: var(--brand-soft); border-radius: 12px; padding: 10px 14px; margin: 12px 0 4px; }
+.ctx > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; }
+.ctx > summary::-webkit-details-marker { display: none; }
+.ctx .ctitle { flex: 1; font-size: 13px; font-weight: 700; color: var(--brand); }
+.ctx .ctoggle { flex: none; font-size: 12px; font-weight: 700; color: var(--brand); white-space: nowrap; }
+.ctx .ctoggle::after { content: "開く ▼"; }
+.ctx[open] .ctoggle::after { content: "たたむ ▲"; }
+.ctx .ctext { font-size: calc(14px * var(--fs)); white-space: pre-wrap; line-height: 1.7; margin-top: 6px; }
 .cases { display: grid; gap: 8px; }
 .casebtn { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 12px 14px;
   background: var(--card); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; color: var(--ink); font: inherit; }
-.casebtn:hover { border-color: var(--brand); }
 .casebtn b { flex: 1; font-size: 14px; }
 .casebtn small { color: var(--sub); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* AI に質問(下から出るパネル) */
 .askbtn { display: block; width: 100%; margin-top: 14px; padding: 12px; border-radius: 12px;
   border: 1px dashed var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: 15px; }
-.askbtn:hover { border-style: solid; }
 .sheet-wrap { position: fixed; inset: 0; z-index: 45; background: rgba(10, 14, 24, .45); display: flex; align-items: flex-end; justify-content: center; }
 .sheet { width: 100%; max-width: 720px; height: min(86vh, 760px); height: min(86dvh, 760px); display: flex; flex-direction: column; gap: 8px;
   background: var(--card); color: var(--ink); border: 1px solid var(--line); border-bottom: 0; border-radius: 18px 18px 0 0;
@@ -227,7 +231,7 @@ details.rv .exp p { font-size: 14px; }
 .chatlog { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 0;
   overscroll-behavior: contain; border-top: 1px solid var(--line); padding-top: 10px; }
 .chatempty { font-size: 14px; color: var(--sub); text-align: center; margin: auto 8px; }
-.msg { max-width: 88%; padding: 10px 12px; border-radius: 14px; font-size: 15px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg { max-width: 88%; padding: 10px 12px; border-radius: 14px; font-size: calc(15px * var(--fs)); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.me { align-self: flex-end; background: var(--brand); color: var(--brand-ink); border-bottom-right-radius: 4px; }
 .msg.ai { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
 .msg.wait { color: var(--sub); }
@@ -244,3 +248,56 @@ details.rv .exp p { font-size: 14px; }
 .aibtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .aibtns .btn { padding: 12px 8px; }
 .chatempty { white-space: pre-wrap; }
+
+/* 問題カードの上の段(分野・形式の札と ★) */
+.ctop { display: flex; align-items: center; gap: 6px; }
+.ctop .tag { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ctop .tag.tf, .ctop .verdict { flex: none; }
+.ctop .grow { flex: 1; }
+.star { flex: none; background: none; border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px; font-size: 12px; font-weight: 700; color: var(--sub); }
+.star.on { border-color: #e0a800; background: var(--warn-soft); color: #b07d00; }
+:root[data-theme="dark"] .star.on { color: #ffd257; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .star.on { color: #ffd257; } }
+.fsbtn { background: none; border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px; font-size: 12px; color: var(--sub); }
+
+/* 解説ページ:正解・あなたの答えの札、ほかの選択肢 */
+.choice .badge { display: inline-block; margin-right: 6px; vertical-align: 1px; font-size: 12px; line-height: 1.6; font-weight: 800; padding: 0 8px; border-radius: 99px; white-space: nowrap; color: var(--card); }
+.choice.ok .badge { background: var(--ok); }
+.choice.ng .badge { background: var(--ng); }
+.choice.dim { border-width: 1px; color: var(--sub); padding: 8px 12px; }
+.others > summary { cursor: pointer; color: var(--brand); font-size: 14px; font-weight: 700; padding: 2px 0; }
+.others[open] { display: grid; gap: 8px; }
+
+/* 画面下に 2 つ並べるボタン(前の問題 / 次の問題、終わりにする / 続きから解く) */
+.duo { display: grid; gap: 10px; }
+.duo.n2 { grid-template-columns: 1fr 2fr; }
+
+/* ホーム:続きから・ホーム画面に追加 */
+.resume, .install { margin-top: 14px; border-color: var(--brand); }
+.rtop { display: flex; align-items: center; gap: 10px; }
+.rtop b { color: var(--brand); }
+.rtop span { font-size: 14px; color: var(--sub); flex: 1; min-width: 0; }
+.rmeta { font-size: 13px; color: var(--sub); margin: 2px 0 8px; font-variant-numeric: tabular-nums; }
+.resume .duo { margin-top: 12px; }
+.resume .btn { padding: 12px; }
+.install p { margin: 6px 0 0; font-size: 14px; }
+.install .how { color: var(--sub); font-size: 13px; }
+.install .btn { margin-top: 10px; }
+.install .back { padding: 2px 6px; }
+
+/* 設定 */
+.settings { display: grid; gap: 10px; }
+.srow { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { border: 0; background: var(--card); padding: 6px 14px; font-size: 14px; min-width: 52px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: var(--brand); color: var(--brand-ink); font-weight: 700; }
+
+/* キーボードの案内は、指で操作する端末(スマホ・タブレット)では出さない */
+@media (hover: none) { .keyhint { display: none; } }
+
+/* マウスのある端末だけ、ボタンに乗ったら枠の色を変える(iPhone ではタップの後に残ってしまうため) */
+@media (hover: hover) {
+  .mode:hover, .field:hover, .casebtn:hover, button.choice:hover:not([disabled]) { border-color: var(--brand); }
+  .askbtn:hover { border-style: solid; }
+}

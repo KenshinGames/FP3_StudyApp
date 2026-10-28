@@ -7,6 +7,8 @@
   var STORE_KEY = 'fp3study.v1';
   var MOCK_PER_FIELD = 5;   // 模擬試験:各分野から出す問題数(合計 30 問)
   var PASS_RATE = 0.6;      // 学科試験の合格基準は 60%(36 / 60 問)
+  var TODAY_COUNT = 10;     // 今日の10問
+  var TODAY_WRONG = 4;      // 今日の10問に先に入れる「まちがえた問題」の数
 
   var root = document.getElementById('app');
   var fieldById = {};
@@ -17,6 +19,7 @@
   function caseQs(cid) { return QS.filter(function (q) { return q.jitsu && q.cid === cid; }); }
 
   /* ---------- 保存(ブラウザの localStorage。使えないときもエラーにしない) ---------- */
+  // { q: {問題id: {r, w, last}}, run: 途中の問題, star: {問題id: 1}, mute, font, ai, pwaHint }
   var mem = null;
   function load() {
     if (mem) return mem;
@@ -37,6 +40,28 @@
   }
   function recOf(q) { return load().q[q.id] || null; }
   function wrongList() { return QS.filter(function (q) { var r = recOf(q); return r && r.last === false; }); }
+
+  // ★(あとで見直す)
+  function isStar(q) { return !!(load().star || {})[q.id]; }
+  function toggleStar(q) {
+    var s = load();
+    s.star = s.star || {};
+    if (s.star[q.id]) delete s.star[q.id]; else s.star[q.id] = 1;
+    save();
+    return !!s.star[q.id];
+  }
+  function starList() { return QS.filter(isStar); }
+
+  // 文字の大きさ(問題文・選択肢・解説・事例・AI の答え)
+  var FONT_SIZES = [{ id: 's', name: '小' }, { id: 'm', name: '中' }, { id: 'l', name: '大' }];
+  function fontId() { var f = load().font; return f === 's' || f === 'l' ? f : 'm'; }
+  function fontName() { return FONT_SIZES.filter(function (f) { return f.id === fontId(); })[0].name; }
+  function applyFont() { document.documentElement.setAttribute('data-fs', fontId()); }
+  function setFont(id) { load().font = id; save(); applyFont(); }
+  function cycleFont() {
+    var ids = FONT_SIZES.map(function (f) { return f.id; });
+    setFont(ids[(ids.indexOf(fontId()) + 1) % ids.length]);
+  }
 
   /* ---------- 小道具 ---------- */
   function h(tag, attrs, kids) {
@@ -61,8 +86,9 @@
     return a;
   }
   function pct(n, d) { return d ? Math.round(n * 100 / d) : 0; }
-  function mount(node) { root.replaceChildren(node); window.scrollTo(0, 0); }
+  function mount(node, y) { root.replaceChildren(node); window.scrollTo(0, y || 0); }
   function bar(p) { return h('div', { class: 'bar' }, [h('i', { style: 'width:' + p + '%' })]); }
+  function answeredIn(picks) { return (picks || []).filter(function (p) { return p != null; }).length; }
 
   /* ---------- 効果音 ---------- */
   var actx = null;
@@ -116,6 +142,46 @@
     document.body.appendChild(el);
     setTimeout(function () { el.remove(); }, 800);
   }
+
+  /* ---------- 画面の行き来(iPhone のスワイプで戻る・ブラウザの戻るボタン) ---------- */
+  // 画面を進めるたびに履歴を 1 つ積み、戻ると popstate で 1 つ前の画面を出す。
+  // 履歴の中身:v = 画面(home / field / cases / run / result)、d = ホームから何画面目か(ホームへは d 個戻る)
+  var histOK = true;
+  var screen = 'home';
+  var homeY = 0;          // ホームのスクロール位置(戻ってきたときに元の場所を出す)
+  var closeSheet = null;  // AI に質問のパネルが開いている間だけ、閉じる関数が入る
+  try { history.scrollRestoration = 'manual'; } catch (e) { /* なくてもよい */ }
+  function depth() { return (history.state && history.state.d) || 0; }
+  function nav(st, replace) {
+    if (!histOK) return;
+    try { history[replace ? 'replaceState' : 'pushState'](st, ''); } catch (e) { histOK = false; }
+  }
+  function forward(st) {   // 新しい画面へ進む
+    if (screen === 'home') homeY = window.scrollY;
+    st.d = depth() + 1;
+    nav(st);
+  }
+  function goBack() {      // 1 つ前の画面へ(履歴が使えないときはホームへ)
+    if (histOK && depth() > 0) history.back(); else home(homeY);
+  }
+  function goHome() {
+    if (histOK && depth() > 0) history.go(-depth()); else home(homeY);
+  }
+  // 履歴の中身から画面を出す(戻る・進む・読み込み直し)
+  function render(st) {
+    st = st || {};
+    if (st.v === 'run' && (run || resumeRun())) { showCurrent(); return; }
+    if (st.v === 'field' && fieldById[st.id]) { fieldMenu(st.id); return; }
+    if (st.v === 'cases') { caseMenu(); return; }
+    if (st.v && st.v !== 'home') nav({ v: 'home', d: st.d || 0 }, true);
+    home(homeY);
+  }
+  window.addEventListener('popstate', function (e) {
+    if (closeSheet) { closeSheet(); return; }   // AI に質問のパネルを閉じるだけ
+    document.querySelectorAll('.overlay').forEach(function (o) { o.remove(); });
+    if (run && !(e.state && e.state.v === 'run')) suspend();
+    render(e.state);
+  });
 
   /* ---------- AI に質問(解説を読んでも分からないところを聞く) ---------- */
   // config.js の CHAT_URL に Worker(worker/ フォルダ。Cloudflare Workers AI の無料枠)を入れると、この画面の中で答えが返る。
@@ -268,7 +334,8 @@
       }).catch(function (err) {
         var code = err && err.message;
         if (err && err.name === 'AbortError') { log.pop(); out.remove(); return; }
-        fail(code === 'daily_limit' ? '今日の無料のAI回数を使い切りました(毎朝9時に戻ります)。下のボタンから ChatGPT か Claude で聞けます。'
+        fail(navigator.onLine === false ? 'インターネットにつながっていません。つながってから、もう一度送ってください。'
+          : code === 'daily_limit' ? '今日の無料のAI回数を使い切りました(毎朝9時に戻ります)。下のボタンから ChatGPT か Claude で聞けます。'
           : code === 'too_many' ? '質問が続いたので、少し待ってからもう一度送ってください。'
           : code === 'busy' ? 'AIが混み合っています。少し待ってから送るか、下のボタンから ChatGPT か Claude で聞いてください。'
           : code === 'refusal' ? 'この質問にはお答えできませんでした。聞き方を変えてみてください。'
@@ -276,11 +343,17 @@
       }).then(function () { setBusy(null); });
     }
 
-    function close() {
+    // 閉じる:履歴に積んだ 1 つを戻す(iPhone のスワイプで戻るでも閉じる)。popstate から closeSheet が呼ばれる
+    function shut() {
+      if (closeSheet !== shut) return;
+      closeSheet = null;
       if (busy) busy.abort();
       wrapEl.remove();
       document.body.style.overflow = '';
       document.removeEventListener('keydown', onKey);
+    }
+    function close() {
+      if (pushed && history.state && history.state.sheet) history.back(); else shut();
     }
     function onKey(e) {
       if (e.key === 'Escape') { e.preventDefault(); close(); }
@@ -307,34 +380,105 @@
     document.body.appendChild(wrapEl);
     document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', onKey);
+    closeSheet = shut;
+    var cur = history.state || {}, st = {};
+    Object.keys(cur).forEach(function (k) { st[k] = cur[k]; });
+    st.sheet = 1;
+    st.d = depth() + 1;
+    nav(st);
+    var pushed = histOK;
     list.scrollTop = list.scrollHeight;
     setTimeout(function () { input.focus(); }, 50);
   }
 
   /* ---------- 出題セッション ---------- */
+  // run = { title, mock, items: [{q, o(選択肢の並び), labels, correct}], i, picks, ctxOpen }
+  // 答えるたびに保存(load().run)するので、途中でやめても・ページが読み込み直されても「続きから」で再開できる
   var run = null;
   var keyHandler = null;
   function setKeys(fn) {
     if (keyHandler) document.removeEventListener('keydown', keyHandler);
-    // AI に質問している間・文字を入力している間は、画面のキー操作(Enter で次へ など)を止める
+    // AI に質問している間・確認ボックスが出ている間・文字を入力している間は、画面のキー操作(Enter で次へ など)を止める
     keyHandler = fn && function (e) {
-      if (document.querySelector('.sheet-wrap') || /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+      if (document.querySelector('.sheet-wrap, .overlay') || /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
       fn(e);
     };
     if (keyHandler) document.addEventListener('keydown', keyHandler);
   }
 
-  // 選択肢を並べて、1 問分の表示データにする(○× は並び固定)
-  function prepare(q) {
+  // 選択肢を並べて、1 問分の表示データにする(○× は並び固定)。order を渡すと、その並び(続きから再開するとき)
+  function prepare(q, order) {
     if (q.tf) return { q: q, labels: ['○(正しい)', '×(誤り)'], correct: q.a ? 0 : 1 };
-    var order = shuffle([0, 1, 2, 3]);
-    return { q: q, labels: order.map(function (i) { return q.c[i]; }), correct: order.indexOf(0) };
+    var idx = q.c.map(function (c, i) { return i; });
+    if (!order || order.length !== idx.length || order.slice().sort().join() !== idx.join()) order = shuffle(idx);
+    return { q: q, o: order, labels: order.map(function (i) { return q.c[i]; }), correct: order.indexOf(0) };
   }
 
-  // 実技の事例文(問題・解説の上に表示)
-  function ctxBox(q) {
-    if (!q.jitsu) return null;
-    return h('div', { class: 'ctx' }, [h('div', { class: 'ctitle' }, ['📋 事例:' + q.ctitle]), h('div', { class: 'ctext' }, [q.ctx])]);
+  // 途中の問題の保存・再開
+  function persist() {
+    if (!run) return;
+    load().run = {
+      t: run.title, m: run.mock ? 1 : 0, i: run.i, p: run.picks,
+      ids: run.items.map(function (it) { return it.q.id; }),
+      o: run.items.map(function (it) { return it.o || null; })
+    };
+    save();
+  }
+  function clearSaved() { delete load().run; save(); }
+  function savedRun() {
+    var s = load().run;
+    if (!s || !s.ids || !s.ids.length || s.ids.some(function (id) { return !QS[id]; })) return null;
+    return s;
+  }
+  function resumeRun() {
+    var s = savedRun();
+    if (!s) return false;
+    run = {
+      title: s.t, mock: !!s.m, i: Math.min(s.i || 0, s.ids.length - 1), picks: (s.p || []).slice(), ctxOpen: {},
+      items: s.ids.map(function (id, k) { return prepare(QS[id], s.o && s.o[k]); })
+    };
+    return true;
+  }
+  // 出題をいったん離れる(答えは保存したまま。1 問も答えていなければ消す)
+  function suspend() {
+    if (run && !answeredIn(run.picks)) clearSaved();
+    run = null;
+    setKeys(null);
+  }
+  function showCurrent() {
+    if (!run.mock && run.picks[run.i] != null) showExplanation(); else showQuestion();
+  }
+
+  // 実技の事例文(タップで開く / たたむ)。remember を渡すと、開いたかどうかを覚えておく
+  function ctxBox(q, open, remember) {
+    var d = h('details', { class: 'ctx', open: !!open }, [
+      h('summary', null, [h('span', { class: 'ctitle' }, ['📋 事例:' + q.ctitle]), h('span', { class: 'ctoggle' })]),
+      h('div', { class: 'ctext' }, [q.ctx])
+    ]);
+    if (remember) d.addEventListener('toggle', function () { remember(d.open); });
+    return d;
+  }
+  function firstOfCase() {
+    var q = run.items[run.i].q, prev = run.i > 0 && run.items[run.i - 1].q;
+    return !prev || !prev.jitsu || prev.cid !== q.cid;
+  }
+  function rememberCtx(cid) { var r = run; return function (open) { r.ctxOpen[cid] = open; }; }
+
+  // ★ ボタン(あとで見直す)
+  function starButton(q) {
+    var b = h('button', { class: 'star', onclick: function () { paint(toggleStar(q)); } });
+    function paint(on) {
+      b.textContent = on ? '★ 見直す' : '☆ 見直す';
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', String(on));
+      b.setAttribute('aria-label', on ? '★を外す' : 'あとで見直す(★を付ける)');
+    }
+    paint(isStar(q));
+    return b;
+  }
+  // 問題カードの上の段:分野・形式の札と ★
+  function cardTop(q, extra) {
+    return h('div', { class: 'ctop' }, [h('span', { class: 'tag' }, [fieldById[q.f].name])].concat(extra || [], [h('span', { class: 'grow' }), starButton(q)]));
   }
 
   function startRun(opts) {
@@ -343,28 +487,49 @@
     run = {
       title: opts.title,
       mock: !!opts.mock,
-      items: qs.map(prepare),
+      items: qs.map(function (q) { return prepare(q); }),
       i: 0,
-      picks: []
+      picks: [],
+      ctxOpen: {}
     };
+    persist();
+    // 結果の画面からの「もう一度」は履歴を増やさない(戻るで 1 つ前の画面へ)
+    var st = history.state || {};
+    if (st.v === 'run' || st.v === 'result') nav({ v: 'run', d: depth() }, true); else forward({ v: 'run' });
     showQuestion();
   }
+  // ホームなどから始める。途中の模擬試験があれば、消えてよいか先に聞く
+  function begin(opts) {
+    var s = savedRun(), n = s && s.m ? answeredIn(s.p) : 0;
+    if (!n) { startRun(opts); return; }
+    ask('途中の模擬試験(' + n + ' / ' + s.ids.length + '問 回答済み)があります。新しく始めると、その答えは消えます。', '新しく始める', function () { startRun(opts); });
+  }
 
-  // 問題の画面:答えを選ぶと、そのたびに解説ページ(showExplanation)へ進む
-  function showQuestion() {
+  function header() {
+    var fs = h('button', { class: 'fsbtn', 'aria-label': '文字の大きさを変える', onclick: function () { cycleFont(); fs.textContent = '文字:' + fontName(); } }, ['文字:' + fontName()]);
+    return h('div', { class: 'qhead' }, [
+      h('button', { class: 'back', onclick: quit }, ['← やめる']),
+      h('div', { class: 'grow' }),
+      fs,
+      h('div', { class: 'qcount' }, [(run.i + 1) + ' / ' + run.items.length])
+    ]);
+  }
+
+  // 問題の画面:答えを選ぶと、そのたびに解説ページ(showExplanation)へ進む。模擬試験は前後に動ける
+  function showQuestion(y) {
+    screen = 'run';
     var it = run.items[run.i];
     var q = it.q;
+    var last = run.i === run.items.length - 1;
 
     var wrap = h('div', { class: 'stack' });
     wrap.appendChild(header());
-    wrap.appendChild(bar(pct(run.i, run.items.length)));
+    wrap.appendChild(bar(pct(run.mock ? answeredIn(run.picks) : run.i, run.items.length)));
 
     var card = h('div', { class: 'card' });
-    card.appendChild(h('div', null, [
-      h('span', { class: 'tag' }, [fieldById[q.f].name]),
-      h('span', { class: 'tag tf' }, [q.jitsu ? '実技' : q.tf ? '○×' : '4択'])
-    ]));
-    if (q.jitsu) card.appendChild(ctxBox(q));
+    card.appendChild(cardTop(q, [h('span', { class: 'tag tf' }, [q.jitsu ? '実技' : q.tf ? '○×' : '4択'])]));
+    // 事例文:その事例の 1 問目は開いておく。2 問目からはたたむ(開いたら、その事例の間は開いたまま)
+    if (q.jitsu) card.appendChild(firstOfCase() ? ctxBox(q, true) : ctxBox(q, run.ctxOpen[q.cid], rememberCtx(q.cid)));
     card.appendChild(h('div', { class: 'qtext' }, [q.q]));
     var list = h('div', { class: 'choices' + (q.tf ? ' tfgrid' : '') });
     it.labels.forEach(function (label, i) {
@@ -377,25 +542,39 @@
     card.appendChild(list);
     wrap.appendChild(card);
     var chosen = run.mock && run.picks[run.i] != null;
-    if (chosen) {
-      wrap.appendChild(h('div', { class: 'actions' }, [
-        h('button', { class: 'btn main', onclick: next }, [run.i === run.items.length - 1 ? '答え合わせへ' : '次の問題へ'])
-      ]));
-      wrap.appendChild(h('div', { class: 'hint' }, ['選び直せます。Enter キーでも進めます']));
+    var keys = q.tf ? '1(○)・2(×)キーでも答えられます' : '1〜4 キーでも答えられます';
+    if (run.mock) {
+      // 前の問題・次の問題は画面下に固定(指の届く場所)
+      var btns = [];
+      if (run.i > 0) btns.push(h('button', { class: 'btn', onclick: prev }, ['← 前の問題']));
+      if (chosen) btns.push(h('button', { class: 'btn main', onclick: next }, [last ? '答え合わせへ' : '次の問題へ →']));
+      var note = chosen ? '選び直せます。' : '答え合わせは最後にまとめて。';
+      var keyNote = chosen ? 'Enter で次へ・← キーで前へ' : keys;
+      if (btns.length) {
+        wrap.classList.add('has-dock');
+        wrap.appendChild(h('div', { class: 'dock' }, [
+          h('div', { class: 'duo n' + btns.length }, btns),
+          h('div', { class: 'hint' }, [note, h('span', { class: 'keyhint' }, [keyNote])])
+        ]));
+      } else {
+        wrap.appendChild(h('div', { class: 'hint' }, [note, h('span', { class: 'keyhint' }, [keyNote])]));
+      }
     } else {
-      wrap.appendChild(h('div', { class: 'hint' }, [(run.mock ? '答え合わせは最後にまとめて。' : '') + (q.tf ? '1(○)・2(×)キーでも答えられます' : '1〜4 キーでも答えられます')]));
+      wrap.appendChild(h('div', { class: 'hint keyhint' }, [keys]));
     }
-    mount(wrap);
+    mount(wrap, y);
 
     setKeys(function (e) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (chosen && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); next(); return; }
+      if (run.mock && e.key === 'ArrowLeft' && run.i > 0) { e.preventDefault(); prev(); return; }
       if (/^[1-4]$/.test(e.key) && +e.key <= it.labels.length) choose(+e.key - 1);
     });
   }
 
-  // 解説ページ:正解・不正解の判定と、やさしい解説
+  // 解説ページ:判定は小さく、正解とあなたの答えだけ出して、解説がすぐ読めるようにする
   function showExplanation() {
+    screen = 'run';
     var it = run.items[run.i];
     var q = it.q;
     var picked = run.picks[run.i];
@@ -406,24 +585,14 @@
     wrap.appendChild(header());
     wrap.appendChild(bar(pct(run.i + 1, run.items.length)));
 
-    var vd = h('div', { class: 'verdict big ' + (ok ? 'ok' : 'ng') }, [ok ? '⭕ 正解!' : '❌ 不正解']);
-    if (!ok) vd.appendChild(h('small', null, ['正しい答えは「' + it.labels[it.correct] + '」です']));
-    wrap.appendChild(vd);
-
-    var card = h('div', { class: 'card' });
-    card.appendChild(h('span', { class: 'tag' }, [fieldById[q.f].name]));
-    if (q.jitsu) card.appendChild(ctxBox(q));
-    card.appendChild(h('div', { class: 'qtext' }, [q.q]));
-    var list = h('div', { class: 'choices' + (q.tf ? ' tfgrid' : '') });
-    it.labels.forEach(function (label, i) {
-      var cls = 'choice' + (i === it.correct ? ' ok' : i === picked ? ' ng' : '');
-      var mark = i === it.correct ? '  ← 正解' : (i === picked ? '  ← あなたの答え' : '');
-      var inner = q.tf
-        ? [h('span', { class: 't' }, [label + mark])]
-        : [h('span', { class: 'n' }, [String(i + 1)]), h('span', { class: 't' }, [label + mark])];
-      list.appendChild(h('button', { class: cls, disabled: true }, inner));
-    });
-    card.appendChild(list);
+    // 判定は問題カードの上の段に(別の箱にしない分、解説が上に来る)
+    var card = h('div', { class: 'card judged ' + (ok ? 'ok' : 'ng') });
+    card.appendChild(h('div', { class: 'ctop' }, [
+      h('span', { class: 'verdict ' + (ok ? 'ok' : 'ng') }, [ok ? '⭕ 正解!' : '❌ 不正解']), h('span', { class: 'grow' }), starButton(q)
+    ]));
+    if (q.jitsu) card.appendChild(ctxBox(q, run.ctxOpen[q.cid], rememberCtx(q.cid)));
+    card.appendChild(h('div', { class: 'qtext sm' }, [q.q]));
+    card.appendChild(answerRows(it, picked));
     wrap.appendChild(card);
 
     wrap.appendChild(h('div', { class: 'card exp' }, [h('h3', null, ['解説']), h('p', null, [q.e]), askButton(it, picked)]));
@@ -431,7 +600,7 @@
     wrap.classList.add('has-dock');
     wrap.appendChild(h('div', { class: 'dock' }, [
       h('button', { class: 'btn main', onclick: next }, [last ? '結果を見る' : '次の問題へ']),
-      h('div', { class: 'hint' }, ['Enter / スペースキーでも進めます'])
+      h('div', { class: 'hint keyhint' }, ['Enter / スペースキーでも進めます'])
     ]));
     mount(wrap);
 
@@ -441,18 +610,30 @@
     });
   }
 
-  function header() {
-    return h('div', { class: 'qhead' }, [
-      h('button', { class: 'back', onclick: quit }, ['← やめる']),
-      h('div', { class: 'grow' }),
-      h('div', { class: 'qcount' }, [(run.i + 1) + ' / ' + run.items.length])
-    ]);
+  // 正解(と、まちがえたときはあなたの答え)を上に。ほかの選択肢はたたむ
+  function answerRows(it, picked) {
+    var box = h('div', { class: 'choices answers' });
+    function row(i, kind, badge) {
+      return h('div', { class: 'choice ' + kind }, [
+        it.q.tf ? null : h('span', { class: 'n' }, [String(i + 1)]),
+        h('span', { class: 't' }, [badge ? h('span', { class: 'badge' }, [badge]) : null, it.labels[i]])
+      ]);
+    }
+    box.appendChild(row(it.correct, 'ok', '正解'));
+    if (picked != null && picked !== it.correct) box.appendChild(row(picked, 'ng', 'あなたの答え'));
+    var rest = it.labels.map(function (l, i) { return i; }).filter(function (i) { return i !== it.correct && i !== picked; });
+    if (rest.length && !it.q.tf) {
+      box.appendChild(h('details', { class: 'others' }, [h('summary', null, ['ほかの選択肢(' + rest.length + ')'])]
+        .concat(rest.map(function (i) { return row(i, 'dim'); }))));
+    }
+    return box;
   }
 
   function choose(i) {
     var it = run.items[run.i];
     run.picks[run.i] = i;
-    if (run.mock) { showQuestion(); return; }   // 模擬試験は最後にまとめて答え合わせ
+    persist();
+    if (run.mock) { showQuestion(window.scrollY); return; }   // 模擬試験は最後にまとめて答え合わせ
     var ok = i === it.correct;
     record(it.q, ok);
     playSfx(ok);
@@ -463,6 +644,13 @@
   function next() {
     if (run.i >= run.items.length - 1) { finish(); return; }
     run.i++;
+    persist();
+    showQuestion();
+  }
+  function prev() {
+    if (run.i <= 0) return;
+    run.i--;
+    persist();
     showQuestion();
   }
 
@@ -478,16 +666,20 @@
     document.body.appendChild(ov);
   }
 
+  // やめる:答えはそのまま残し、ホームの「続きから」で再開できる
   function quit() {
-    if (!run.picks.length) { home(); return; }
-    ask('途中でやめますか?(ここまでの答えは記録されています)', 'やめる', home);
+    suspend();
+    goBack();
   }
 
   /* ---------- 結果 ---------- */
   function finish() {
     setKeys(null);
+    screen = 'result';
     var items = run.items;
     if (run.mock) items.forEach(function (it, i) { record(it.q, run.picks[i] === it.correct); });
+    clearSaved();
+    nav({ v: 'result', d: depth() }, true);
     var right = items.filter(function (it, i) { return run.picks[i] === it.correct; }).length;
     var total = items.length;
     var rate = right / total;
@@ -531,8 +723,8 @@
         var q = x.it.q;
         var mine = x.pick == null ? '未回答' : x.it.labels[x.pick];
         rv.appendChild(h('div', { class: 'review' }, [
-          h('span', { class: 'tag' }, [fieldById[q.f].short]),
-          q.jitsu ? h('details', { class: 'rv' }, [h('summary', null, ['事例を見る']), ctxBox(q)]) : null,
+          h('div', { class: 'ctop' }, [h('span', { class: 'tag' }, [fieldById[q.f].short]), h('span', { class: 'grow' }), starButton(q)]),
+          q.jitsu ? ctxBox(q, false) : null,
           h('div', { class: 'qtext' }, [q.q]),
           h('div', { class: 'ans' }, [h('span', { class: 'mine' }, ['あなたの答え:' + mine])]),
           h('div', { class: 'ans' }, [h('span', { class: 'right' }, ['正解:' + x.it.labels[x.it.correct]])]),
@@ -550,7 +742,7 @@
         var ov = h('div', { class: 'card' }, [h('h3', { style: 'font-size:14px' }, ['正解した問題(' + okList.length + '問)'])]);
         okList.forEach(function (x) {
           ov.appendChild(h('div', { class: 'review' }, [
-            h('span', { class: 'tag' }, [fieldById[x.it.q.f].short]),
+            h('div', { class: 'ctop' }, [h('span', { class: 'tag' }, [fieldById[x.it.q.f].short]), h('span', { class: 'grow' }), starButton(x.it.q)]),
             h('div', { class: 'qtext' }, [x.it.q.q]),
             h('div', { class: 'ans' }, [h('span', { class: 'right' }, ['⭕ ' + x.it.labels[x.it.correct]])]),
             h('details', { class: 'rv' }, [h('summary', null, ['解説を見る']), h('div', { class: 'exp' }, [h('p', null, [x.it.q.e]), askButton(x.it, x.pick)])])
@@ -568,7 +760,7 @@
       h('button', { class: 'btn' + (miss.length ? '' : ' main'), onclick: function () {
         startRun({ title: again.title, mock: again.mock, questions: again.items.map(function (it) { return it.q; }) });
       } }, ['同じ問題をもう一度']),
-      h('button', { class: 'btn', onclick: home }, ['ホームにもどる'])
+      h('button', { class: 'btn', onclick: goHome }, ['ホームにもどる'])
     ]));
     mount(wrap);
     run = null;
@@ -585,21 +777,42 @@
     return { total: qs.length, tried: tried, right: right, wrong: wrong };
   }
 
-  function home() {
+  // 今日の10問:まちがえた問題を少し、まだ解いていない問題を多めに。足りなければ解いた問題から
+  function todaySet() {
+    var wrong = [], fresh = [], done = [];
+    shuffle(PLAIN).forEach(function (q) {
+      var r = recOf(q);
+      (!r ? fresh : r.last === false ? wrong : done).push(q);
+    });
+    var pick = wrong.slice(0, TODAY_WRONG);
+    pick = pick.concat(fresh.slice(0, TODAY_COUNT - pick.length));
+    pick = pick.concat(wrong.slice(TODAY_WRONG, TODAY_WRONG + TODAY_COUNT - pick.length));
+    pick = pick.concat(done.slice(0, TODAY_COUNT - pick.length));
+    return shuffle(pick);
+  }
+
+  function home(y) {
+    if (run) suspend();
     setKeys(null);
-    run = null;
-    var tried = 0, right = 0, answers = 0, correctAnswers = 0;
+    screen = 'home';
+    var tried = 0, answers = 0, correctAnswers = 0;
     QS.forEach(function (q) {
       var r = recOf(q);
-      if (r) { tried++; if (r.last) right++; answers += r.r + r.w; correctAnswers += r.r; }
+      if (r) { tried++; answers += r.r + r.w; correctAnswers += r.r; }
     });
     var wrongs = wrongList();
+    var stars = starList();
 
     var wrap = h('div');
     wrap.appendChild(h('div', { class: 'hero' }, [
       h('h1', null, ['FP3級 合格ドリル']),
-      h('p', null, ['3級FP技能検定(学科)対策。4択・○×の問題を解いて、解説でしっかり理解しよう。'])
+      h('p', null, ['3級FP技能検定の対策。問題を解いて、解説でしっかり理解しよう。'])
     ]));
+
+    var rc = resumeCard();
+    if (rc) wrap.appendChild(rc);
+    var ic = installCard();
+    if (ic) wrap.appendChild(ic);
 
     wrap.appendChild(h('div', { class: 'sec' }, ['あなたの進み具合']));
     wrap.appendChild(h('div', { class: 'card stack' }, [
@@ -613,47 +826,46 @@
 
     wrap.appendChild(h('div', { class: 'sec' }, ['問題を解く']));
     var modes = h('div', { class: 'modes' });
-    modes.appendChild(mode('📝', '模擬試験(30問)', '6分野から5問ずつ。判定と解説は最後にまとめて。60%で合格ライン', true, function () {
+    modes.appendChild(mode('☀️', '今日の10問', 'まちがえた問題・まだ解いていない問題を優先して10問。1問ごとに解説', true, function () {
+      begin({ title: '今日の10問', questions: todaySet() });
+    }));
+    modes.appendChild(mode('📝', '模擬試験(30問)', '6分野から5問ずつ。判定と解説は最後にまとめて。60%で合格ライン', false, function () {
       var picked = [];
       FIELDS.forEach(function (f) {
         picked = picked.concat(shuffle(PLAIN.filter(function (q) { return q.f === f.id; })).slice(0, MOCK_PER_FIELD));
       });
-      startRun({ title: '模擬試験', mock: true, questions: shuffle(picked) });
-    }));
-    modes.appendChild(mode('🎲', 'ランダム10問', '全分野から。1問ごとに ⭕❌ の判定と解説', false, function () {
-      startRun({ title: 'ランダム10問', questions: shuffle(PLAIN).slice(0, 10) });
+      begin({ title: '模擬試験', mock: true, questions: shuffle(picked) });
     }));
     modes.appendChild(mode('🔁', '間違えた問題を復習(' + wrongs.length + '問)',
       wrongs.length ? '前回まちがえた問題だけ。正解すると復習リストから消えます' : 'まちがえた問題がたまるとここで復習できます', false, function () {
-        startRun({ title: '間違えた問題の復習', questions: shuffle(wrongs) });
+        begin({ title: '間違えた問題の復習', questions: shuffle(wrongs) });
       }, !wrongs.length));
+    modes.appendChild(mode('⭐', '★を付けた問題(' + stars.length + '問)',
+      stars.length ? 'あとで見直すために ★ を付けた問題' : '問題の右上の「☆ 見直す」をタップすると、ここに集まります', false, function () {
+        begin({ title: '★を付けた問題', questions: shuffle(stars) });
+      }, !stars.length));
     wrap.appendChild(modes);
 
     wrap.appendChild(h('div', { class: 'sec' }, ['実技(事例形式)']));
+    var jq = QS.filter(function (q) { return q.jitsu; });
+    var jRight = jq.filter(function (q) { var r = recOf(q); return r && r.last; }).length;
     var jm = h('div', { class: 'modes' });
     jm.appendChild(mode('📋', '実技 ランダム2事例', '事例文を読んで、続けて答える形式。1問ごとに ⭕❌ の判定と解説', false, function () {
       var ids = shuffle(CASES.map(function (c, i) { return i; })).slice(0, 2), qs = [];
       ids.forEach(function (cid) { qs = qs.concat(caseQs(cid)); });
-      startRun({ title: '実技 ランダム2事例', questions: qs });
+      begin({ title: '実技 ランダム2事例', questions: qs });
+    }));
+    jm.appendChild(mode('🗂', '事例を選んで解く(' + CASES.length + '事例)', '分野ごとの一覧から選ぶ。正解済み ' + jRight + ' / ' + jq.length + '問', false, function () {
+      forward({ v: 'cases' });
+      caseMenu();
     }));
     wrap.appendChild(jm);
-    var cl = h('div', { class: 'cases' });
-    CASES.forEach(function (c, cid) {
-      var qs = caseQs(cid), right = 0, wrong = 0;
-      qs.forEach(function (q) { var r = recOf(q); if (r) { if (r.last) right++; else wrong++; } });
-      cl.appendChild(h('button', { class: 'casebtn', onclick: function () { startRun({ title: '実技:' + c.title, questions: qs }); } }, [
-        h('span', { class: 'tag' }, [fieldById[c.f].short]),
-        h('b', null, [c.title]),
-        h('small', null, [right + '/' + c.n + (wrong ? ' ・復習' + wrong : '')])
-      ]));
-    });
-    wrap.appendChild(cl);
 
     wrap.appendChild(h('div', { class: 'sec' }, ['分野ごとに解く']));
     var fl = h('div', { class: 'modes' });
     FIELDS.forEach(function (f) {
       var s = fieldStat(f.id);
-      fl.appendChild(h('button', { class: 'field', onclick: function () { fieldMenu(f.id); } }, [
+      fl.appendChild(h('button', { class: 'field', onclick: function () { forward({ v: 'field', id: f.id }); fieldMenu(f.id); } }, [
         h('div', { class: 'top' }, [h('span', { class: 'ic' }, [f.icon]), h('b', null, [f.name]), h('small', null, [s.total + '問'])]),
         h('div', { class: 'desc' }, [f.desc]),
         bar(pct(s.right, s.total)),
@@ -662,18 +874,59 @@
     });
     wrap.appendChild(fl);
 
+    wrap.appendChild(h('div', { class: 'sec' }, ['設定']));
+    var muted = !!load().mute;
+    wrap.appendChild(h('div', { class: 'card settings' }, [
+      h('div', { class: 'srow' }, [h('span', null, ['効果音']), seg([{ id: 'on', name: 'ON' }, { id: 'off', name: 'OFF' }], muted ? 'off' : 'on', function (id) {
+        load().mute = id === 'off'; save();
+        if (id === 'on') playSfx(true);
+      })]),
+      h('div', { class: 'srow' }, [h('span', null, ['文字の大きさ']), seg(FONT_SIZES, fontId(), setFont)]),
+      h('div', { class: 'srow' }, [h('button', { class: 'linkbtn', onclick: function () {
+        ask('学習の記録(解いた結果・途中の問題)をすべて消しますか?★と設定は残ります。', '消す', function () {
+          var s = load(); s.q = {}; delete s.run; save(); home(window.scrollY);
+        });
+      } }, ['学習の記録を消す'])])
+    ]));
+
     wrap.appendChild(h('div', { class: 'note' }, [
       '※ 問題・解説はこのアプリのオリジナルです。2026年6月〜2027年5月の試験(法令基準日:2026年4月1日)を想定して作っています。2026年の税制改正で数値が動いている項目(基礎控除・配偶者控除・給与所得控除など)は、確認が取れるまで出題していません。数値や制度は法改正で変わることがあるため、受検前に必ず試験実施団体(日本FP協会・金融財政事情研究会)の公式情報と最新テキストで確認してください。学科試験は 60 問中 36 問以上(60%)が合格基準です。'
     ]));
-    wrap.appendChild(h('div', { style: 'text-align:center' }, [
-      h('button', { class: 'linkbtn', onclick: function () { load().mute = !load().mute; save(); if (!load().mute) playSfx(true); home(); } },
-        ['効果音:' + (load().mute ? 'OFF(タップでONにする)' : 'ON(タップでOFFにする)')]),
-      h('br'),
-      h('button', { class: 'linkbtn', onclick: function () {
-        ask('学習の記録をすべて消しますか?', '消す', function () { mem = { q: {} }; save(); home(); });
-      } }, ['学習の記録を消す'])
-    ]));
-    mount(wrap);
+    mount(wrap, y);
+  }
+
+  // 切り替えボタン(効果音・文字の大きさ)。押すとその場でホームを描き直す
+  function seg(opts, cur, onPick) {
+    return h('div', { class: 'seg', role: 'group' }, opts.map(function (o) {
+      return h('button', { class: o.id === cur ? 'on' : '', 'aria-pressed': String(o.id === cur), onclick: function () {
+        onPick(o.id);
+        home(window.scrollY);
+      } }, [o.name]);
+    }));
+  }
+
+  // 途中の問題(やめた・ページが読み込み直された)をホームの上に出す
+  function resumeCard() {
+    var s = savedRun();
+    if (!s) return null;
+    var n = answeredIn(s.p), total = s.ids.length, at = Math.min(s.i || 0, total - 1) + 1;
+    function discard() {
+      if (s.m && n) ask('この模擬試験の答え(' + n + '問)を消して、終わりにしますか?', '終わりにする', function () { clearSaved(); home(window.scrollY); });
+      else { clearSaved(); home(window.scrollY); }
+    }
+    return h('div', { class: 'card resume' }, [
+      h('div', { class: 'rtop' }, [h('b', null, ['▶ 続きから']), h('span', null, [s.t])]),
+      h('div', { class: 'rmeta' }, [at + ' / ' + total + '問目' + (s.m ? '(' + n + '問 回答済み)' : '')]),
+      bar(pct(s.m ? n : at - 1, total)),
+      h('div', { class: 'duo n2' }, [
+        h('button', { class: 'btn', onclick: discard }, ['終わりにする']),
+        h('button', { class: 'btn main', onclick: function () {
+          if (!resumeRun()) { home(); return; }
+          forward({ v: 'run' });
+          showCurrent();
+        } }, ['続きから解く'])
+      ])
+    ]);
   }
 
   function mode(icon, title, sub, primary, fn, disabled) {
@@ -684,29 +937,114 @@
     ]);
   }
 
-  // 分野を選んだあと:全問 / 未回答だけ / 苦手だけ
+  // 実技の事例のボタン(正解済み / 問題数)
+  function caseList(cids) {
+    var cl = h('div', { class: 'cases' });
+    cids.forEach(function (cid) {
+      var c = CASES[cid], qs = caseQs(cid), right = 0, wrong = 0;
+      qs.forEach(function (q) { var r = recOf(q); if (r) { if (r.last) right++; else wrong++; } });
+      cl.appendChild(h('button', { class: 'casebtn', onclick: function () { begin({ title: '実技:' + c.title, questions: qs }); } }, [
+        h('span', { class: 'tag' }, [fieldById[c.f].short]),
+        h('b', null, [c.title]),
+        h('small', null, [right + '/' + c.n + (wrong ? ' ・復習' + wrong : '')])
+      ]));
+    });
+    return cl;
+  }
+  function casesOf(fid) { return CASES.map(function (c, i) { return i; }).filter(function (i) { return CASES[i].f === fid; }); }
+
+  // 実技の事例の一覧(分野ごと)
+  function caseMenu() {
+    setKeys(null);
+    screen = 'cases';
+    var wrap = h('div', { class: 'stack' });
+    wrap.appendChild(h('div', { class: 'qhead' }, [h('button', { class: 'back', onclick: goBack }, ['← ホーム'])]));
+    wrap.appendChild(h('div', { class: 'hero', style: 'padding-top:0' }, [h('h1', { style: 'font-size:22px' }, ['📋 実技の事例']),
+      h('p', null, ['事例文を読んで、続けて答える形式です。右の数字は「正解済み / 問題数」。'])]));
+    FIELDS.forEach(function (f) {
+      var ids = casesOf(f.id);
+      if (!ids.length) return;
+      wrap.appendChild(h('div', { class: 'sec' }, [f.icon + ' ' + f.name]));
+      wrap.appendChild(caseList(ids));
+    });
+    mount(wrap);
+  }
+
+  // 分野を選んだあと:全問 / 未回答だけ / 苦手だけ / この分野の実技
   function fieldMenu(id) {
+    setKeys(null);
+    screen = 'field';
     var f = fieldById[id];
     var qs = PLAIN.filter(function (q) { return q.f === id; });
     var fresh = qs.filter(function (q) { return !recOf(q); });
     var wrongs = qs.filter(function (q) { var r = recOf(q); return r && r.last === false; });
 
     var wrap = h('div', { class: 'stack' });
-    wrap.appendChild(h('div', { class: 'qhead' }, [h('button', { class: 'back', onclick: home }, ['← ホーム'])]));
+    wrap.appendChild(h('div', { class: 'qhead' }, [h('button', { class: 'back', onclick: goBack }, ['← ホーム'])]));
     wrap.appendChild(h('div', { class: 'hero', style: 'padding-top:0' }, [h('h1', { style: 'font-size:22px' }, [f.icon + ' ' + f.name]), h('p', null, [f.desc])]));
     var modes = h('div', { class: 'modes' });
     modes.appendChild(mode('▶', '全問(' + qs.length + '問)', 'シャッフルして出題', true, function () {
-      startRun({ title: f.name, questions: shuffle(qs) });
+      begin({ title: f.name, questions: shuffle(qs) });
     }));
     modes.appendChild(mode('🆕', 'まだ解いていない問題(' + fresh.length + '問)', '', false, function () {
-      startRun({ title: f.name + '(未回答)', questions: shuffle(fresh) });
+      begin({ title: f.name + '(未回答)', questions: shuffle(fresh) });
     }, !fresh.length));
     modes.appendChild(mode('🔁', 'まちがえた問題(' + wrongs.length + '問)', '', false, function () {
-      startRun({ title: f.name + '(復習)', questions: shuffle(wrongs) });
+      begin({ title: f.name + '(復習)', questions: shuffle(wrongs) });
     }, !wrongs.length));
     wrap.appendChild(modes);
+    var cids = casesOf(id);
+    if (cids.length) {
+      wrap.appendChild(h('div', { class: 'sec' }, ['この分野の実技(事例形式)']));
+      wrap.appendChild(caseList(cids));
+    }
     mount(wrap);
   }
 
-  home();
+  /* ---------- ホーム画面に追加(アプリのように全画面で開く・電波がなくても解ける) ---------- */
+  var installEvt = null;   // Android の Chrome などで「インストール」を出すためのイベント
+  function standalone() {
+    return navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  }
+  function isIOS() {
+    return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+  function installCard() {
+    if (standalone() || load().pwaHint || (!installEvt && !isIOS())) return null;
+    var card = h('div', { class: 'card install' }, [
+      h('div', { class: 'rtop' }, [h('b', null, ['📲 ホーム画面に追加しよう']), h('span', { class: 'grow' }),
+        h('button', { class: 'back', 'aria-label': 'この案内を閉じる', onclick: function () { load().pwaHint = 1; save(); card.remove(); } }, ['✕'])]),
+      h('p', null, ['アプリのように全画面で開けて、電波がなくても問題を解けます(AIに質問はネットが必要)。']),
+      installEvt
+        ? h('button', { class: 'btn main', onclick: function () {
+          installEvt.prompt();
+          installEvt.userChoice.then(function () { installEvt = null; home(window.scrollY); });
+        } }, ['ホーム画面に追加'])
+        : h('p', { class: 'how' }, ['ブラウザの「共有」ボタン(□に↑。見当たらなければ「…」の中)→「ホーム画面に追加」'])
+    ]);
+    return card;
+  }
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    installEvt = e;
+    if (screen === 'home') home(window.scrollY);
+  });
+
+  // 電波がなくても開けるように、アプリのファイルを端末に保存しておく(sw.js)
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
+    navigator.serviceWorker.register('sw.js').catch(function () { /* 保存できなくてもふつうに動く */ });
+  }
+
+  /* ---------- 起動 ---------- */
+  applyFont();
+  var st0 = null;
+  try { st0 = history.state; } catch (e) { histOK = false; }
+  if (st0 && st0.sheet) {   // AI に質問を開いたまま読み込み直された:パネルの分の履歴は、その下の画面として使う
+    var s1 = {};
+    Object.keys(st0).forEach(function (k) { if (k !== 'sheet') s1[k] = st0[k]; });
+    nav(s1, true);
+    st0 = s1;
+  }
+  if (!st0) nav({ v: 'home', d: 0 }, true);
+  render(st0);
 })();
