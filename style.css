@@ -313,3 +313,24 @@ details.rv .exp p { font-size: calc(14px * var(--fs)); }
 .steps li + li { margin-top: 2px; }
 textarea.code { display: block; width: 100%; resize: vertical; font: 16px/1.4 ui-monospace, Menlo, monospace; padding: 8px 10px;
   border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); word-break: break-all; }
+
+/* ---------- デザイン調整:全体の統一感と、試験日カードのコンパクト化 ---------- */
+* { -webkit-tap-highlight-color: transparent; }
+button { touch-action: manipulation; }
+.card, .mode, .field { border-radius: 16px; }
+.mode, .field, .casebtn, .btn, .choice { transition: border-color .15s ease, background-color .15s ease, transform .05s ease; }
+.mode:active, .field:active, .casebtn:active, .btn:active { transform: scale(.99); }
+.bar > i { transition: width .4s ease; }
+.hero { padding-top: 14px; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .mode, .field, .casebtn, .btn, .choice, .bar > i { transition: none; }
+}
+
+/* 試験日カード:1 行に収める */
+.examcard { padding: 10px 14px; }
+.examline { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.examinfo { font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.examinfo b { font-size: 17px; }
+.examcard input[type="date"] { font: inherit; font-size: 14px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); max-width: 10.5em; }
+.examcard .sbtn { padding: 4px 10px; font-size: 13px; margin-left: 6px; }

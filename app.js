@@ -100,29 +100,27 @@
     return box;
   }
 
-  // 試験日のカード(「あなたの進み具合」の上に出す)。設定したら、ここにカウントダウンも出す
+  // 試験日のカード(「あなたの進み具合」の上)。1 行に収まるコンパクト表示:要点だけ左に、日付入力は右に
   function examCard(rightLast) {
-    var kids = [h('div', { class: 'srow' }, [h('span', null, ['📅 試験日']), examDateInput()])];
-    if (load().examDate) {
+    var info;
+    if (!load().examDate) {
+      info = h('span', { class: 'examinfo' }, ['📅 試験日を設定']);
+    } else {
       var today0 = new Date(); today0.setHours(0, 0, 0, 0);
       var days = Math.round((new Date(load().examDate + 'T00:00:00') - today0) / DAY_MS);
-      var examLabel = load().examDate.replace(/-/g, '/');
       if (days > 0) {
         var remain = QS.length - rightLast;
-        kids.push(h('div', null, [h('b', null, ['あと ' + days + ' 日']), '（' + examLabel + '）']));
-        kids.push(h('div', { class: 'hint' }, [remain > 0
-          ? '正解済みでない問題が ' + remain + ' 問。1日 ' + Math.ceil(remain / days) + ' 問ペースで全部まわります'
-          : '全問正解済み!あとは復習を回してキープしよう']));
+        info = h('span', { class: 'examinfo' }, ['📅 あと ', h('b', null, [days + '日']),
+          remain > 0 ? ' ・ 1日 ' + Math.ceil(remain / days) + '問ペース' : ' ・ 全問正解済み']);
       } else if (days === 0) {
-        kids.push(h('div', null, [h('b', null, ['今日が試験日!']), ' がんばって！']));
+        info = h('span', { class: 'examinfo' }, ['📅 ', h('b', null, ['今日が試験日!'])]);
       } else {
-        kids.push(h('div', null, ['この日付は過ぎました。次の試験を受けるなら、日付を変えてね']));
+        info = h('span', { class: 'examinfo' }, ['📅 過ぎました(日付を変えてね)']);
       }
-    } else {
-      kids.push(h('div', { class: 'hint' }, ['受験日を入れると、ここにカウントダウンが出ます']));
     }
-    return h('div', { class: 'card settings' }, kids);
+    return h('div', { class: 'card examcard' }, [h('div', { class: 'examline' }, [info, examDateInput()])]);
   }
+
   function cycleFont() {
     var ids = FONT_SIZES.map(function (f) { return f.id; });
     setFont(ids[(ids.indexOf(fontId()) + 1) % ids.length]);
