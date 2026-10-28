@@ -118,9 +118,8 @@
   }
 
   /* ---------- AI に質問(解説を読んでも分からないところを聞く) ---------- */
-  // config.js の CHAT_URL が空(ふだん)は、ChatGPT か Claude を新しいタブで開き、問題と質問を入れた状態にする。
-  // 質問する人の無料アカウントで使うので、運営側の料金はかからない。
-  // CHAT_URL に Worker(worker/ フォルダ)を入れると、アプリの中で答えが返る(API の料金は運営側の負担)
+  // config.js の CHAT_URL に Worker(worker/ フォルダ。Cloudflare Workers AI の無料枠)を入れると、この画面の中で答えが返る。
+  // CHAT_URL が空のとき・その日の無料枠を使い切ったときは、ChatGPT か Claude を新しいタブで開き、問題と質問を入れた状態にする
   var CHAT_URL = (window.FP3_CONFIG && window.FP3_CONFIG.CHAT_URL) || '';
   var AIS = [
     { id: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com/?q=' },   // ログインなしでも使える
@@ -171,7 +170,8 @@
     var note = CHAT_URL
       ? 'AIの答えはまちがえることがあります。大事な数値は公式テキストで確かめてください。'
       : 'ChatGPT はログインなしでも無料で使えます。Claude は無料のアカウントが必要です。AIの答えはまちがえることがあるので、大事な数値は公式テキストで確かめてください。';
-    var aiBtns = CHAT_URL ? null : h('div', { class: 'aibtns' }, AIS.map(function (ai, i) {
+    // ChatGPT / Claude で聞くボタン。Worker があるときは、答えを受け取れなかったときだけ出す
+    var aiBtns = h('div', { class: 'aibtns', style: CHAT_URL ? 'display:none' : null }, AIS.map(function (ai) {
       return h('button', { class: 'btn' + (ai.id === lastAi() ? ' main' : ''), onclick: function () { openAi(ai, input.value); } }, [ai.name + 'で聞く ↗']);
     }));
 
@@ -224,6 +224,7 @@
         out.classList.remove('wait');
         out.classList.add('err');
         out.textContent = (answer ? answer + '\n\n' : '') + '⚠ ' + msg;
+        aiBtns.style.display = '';
         list.scrollTop = list.scrollHeight;
       }
 
@@ -266,10 +267,11 @@
       }).catch(function (err) {
         var code = err && err.message;
         if (err && err.name === 'AbortError') { log.pop(); out.remove(); return; }
-        fail(code === 'too_many' ? '質問が続いたので、少し待ってからもう一度送ってください。'
-          : code === 'busy' ? 'AIが混み合っています。少し待ってからもう一度送ってください。'
+        fail(code === 'daily_limit' ? '今日の無料のAI回数を使い切りました(毎朝9時に戻ります)。下のボタンから ChatGPT か Claude で聞けます。'
+          : code === 'too_many' ? '質問が続いたので、少し待ってからもう一度送ってください。'
+          : code === 'busy' ? 'AIが混み合っています。少し待ってから送るか、下のボタンから ChatGPT か Claude で聞いてください。'
           : code === 'refusal' ? 'この質問にはお答えできませんでした。聞き方を変えてみてください。'
-          : 'うまく答えを受け取れませんでした。通信の状態を確かめて、もう一度送ってください。');
+          : 'うまく答えを受け取れませんでした。もう一度送るか、下のボタンから ChatGPT か Claude で聞いてください。');
       }).then(function () { setBusy(null); });
     }
 

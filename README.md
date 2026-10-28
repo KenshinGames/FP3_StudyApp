@@ -13,7 +13,7 @@
 - ランダム10問 / 分野別 / 間違えた問題の復習(1問ごとに解説)
 - 4択と○×。選択肢は毎回シャッフル、キーボード(1〜4・Enter)でも操作可
 - 実技(事例形式):事例文を読んで続けて答える
-- 解説ページの「💬 AIに質問する」:問題と質問を入れた状態で ChatGPT / Claude を新しいタブで開く(料金なし)。アプリの中で答えるようにもできる(有料。[docs/ai-chat.md](docs/ai-chat.md)・`worker/`・`config.js`)
+- 解説ページの「💬 AIに質問する」:この画面の中でAIが答える(Cloudflare Workers AI の無料枠。[docs/ai-chat.md](docs/ai-chat.md)・`worker/`・`config.js`)。無料枠を使い切った日は ChatGPT / Claude を質問入りで開く
 - 学習記録はブラウザの localStorage に保存(サーバー送信なし)
 
 ## 問題の足し方

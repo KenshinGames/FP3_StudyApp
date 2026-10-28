@@ -1,7 +1,6 @@
-# FP3級 合格ドリルの「AIに質問」を中継する Worker(Cloudflare Workers・無料枠で動く)。
-# API キーはここに書かない(秘密の値として登録する):
-#   npx wrangler secret put ANTHROPIC_API_KEY
-# 公開:このフォルダで `npm run deploy`。表示された URL を、リポジトリ直下の config.js の CHAT_URL に入れる。
+# FP3級 合格ドリルの「AIに質問」に答える Worker。
+# ふだんは Cloudflare Workers AI の無料枠で答える(API キー不要・Workers Free プランなら料金なし)。
+# 公開:このフォルダで `npm run deploy`。表示された URL + /chat を、リポジトリ直下の config.js の CHAT_URL に入れる。
 # 手順の全体は docs/ai-chat.md
 name = "fp3-chat"
 main = "src/index.ts"
@@ -13,9 +12,17 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 # routes = [{ pattern = "fp3-api.kenshin-games.jp", custom_domain = true }]
 
+# Workers AI(無料枠:1 日 10,000 Neurons。日本時間の朝 9 時に戻る)
+[ai]
+binding = "AI"
+
 [vars]
-# 使うモデル。安くしたいときは "claude-haiku-5-5"(Opus 5.5 のおよそ 1/40 の料金)
-MODEL = "claude-opus-5-5"
+# 答える AI:"workers-ai"(無料枠)か "anthropic"(Claude。有料。npx wrangler secret put ANTHROPIC_API_KEY が必要)
+PROVIDER = "workers-ai"
+# Workers AI のモデル(日本語が得意で、無料枠の消費が少ないもの)
+WORKERS_AI_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+# Claude のモデル(PROVIDER = "anthropic" のとき)。安くしたいときは "claude-haiku-5-5"
+ANTHROPIC_MODEL = "claude-opus-5-5"
 # 呼び出してよいページ(カンマ区切り)。ローカルで試すときは http://localhost:8000 など
 ALLOWED_ORIGINS = "https://kenshingames.github.io,http://localhost:8000,http://127.0.0.1:8000"
 
