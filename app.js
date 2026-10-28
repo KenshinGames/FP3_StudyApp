@@ -91,7 +91,21 @@
   function answeredIn(picks) { return (picks || []).filter(function (p) { return p != null; }).length; }
 
   /* ---------- 効果音 ---------- */
+  // iPhone はほかのアプリへ移ると音の出口(AudioContext)が止まり(state が 'interrupted' など)、戻っても鳴らないことがある。
+  // 画面が隠れたら閉じて、次に鳴らすとき(答えをタップしたとき)に作り直す
   var actx = null;
+  function audio() {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!actx || actx.state === 'closed') actx = new AC();
+    if (actx.state !== 'running') actx.resume();
+    return actx;
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'hidden' || !actx) return;
+    var old = actx; actx = null;
+    try { old.close(); } catch (e) { /* 閉じられなくても次は作り直す */ }
+  });
   // freq2 を渡すと、freq から freq2 へ音程がすべる
   function tone(freq, start, dur, type, vol, freq2) {
     var o = actx.createOscillator(), g = actx.createGain(), t0 = actx.currentTime + start;
@@ -122,10 +136,7 @@
   function playSfx(ok) {
     if (load().mute) return;
     try {
-      var AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      if (!actx) actx = new AC();
-      if (actx.state === 'suspended') actx.resume();
+      if (!audio()) return;
       if (ok) { // ピンポン
         tone(880, 0, 0.35, 'sine', 0.22); tone(1320, 0.14, 0.5, 'sine', 0.22);
       } else {  // ぴょこん ↘ ふにゃ〜(やわらかい高めの音が、ぴょんと跳ねてしょぼんと下がる)
