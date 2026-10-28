@@ -212,3 +212,32 @@ details.rv .exp p { font-size: 14px; }
 .casebtn:hover { border-color: var(--brand); }
 .casebtn b { flex: 1; font-size: 14px; }
 .casebtn small { color: var(--sub); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* AI に質問(下から出るパネル) */
+.askbtn { display: block; width: 100%; margin-top: 14px; padding: 12px; border-radius: 12px;
+  border: 1px dashed var(--brand); background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: 15px; }
+.askbtn:hover { border-style: solid; }
+.sheet-wrap { position: fixed; inset: 0; z-index: 45; background: rgba(10, 14, 24, .45); display: flex; align-items: flex-end; justify-content: center; }
+.sheet { width: 100%; max-width: 720px; height: min(86vh, 760px); height: min(86dvh, 760px); display: flex; flex-direction: column; gap: 8px;
+  background: var(--card); color: var(--ink); border: 1px solid var(--line); border-bottom: 0; border-radius: 18px 18px 0 0;
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.sheethead { display: flex; align-items: center; gap: 8px; }
+.sheethead .grow { flex: 1; }
+.sheetq { font-size: 13px; color: var(--sub); line-height: 1.5; max-height: 3em; overflow: hidden; }
+.chatlog { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 0;
+  overscroll-behavior: contain; border-top: 1px solid var(--line); padding-top: 10px; }
+.chatempty { font-size: 14px; color: var(--sub); text-align: center; margin: auto 8px; }
+.msg { max-width: 88%; padding: 10px 12px; border-radius: 14px; font-size: 15px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.me { align-self: flex-end; background: var(--brand); color: var(--brand-ink); border-bottom-right-radius: 4px; }
+.msg.ai { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msg.wait { color: var(--sub); }
+.msg.err { border-color: var(--ng); }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.chip { flex: none; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg); font-size: 13px; }
+.chip:disabled, .sendbtn:disabled { opacity: .5; cursor: default; }
+.chatform { display: flex; gap: 8px; align-items: stretch; }
+.chatform textarea { flex: 1; min-width: 0; resize: none; font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.chatform textarea:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
+.sendbtn { width: auto; flex: none; padding: 0 18px; }
+.sheet .hint { margin-top: 0; }

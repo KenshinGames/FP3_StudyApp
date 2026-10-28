@@ -1,0 +1,26 @@
+# FP3級 合格ドリルの「AIに質問」を中継する Worker(Cloudflare Workers・無料枠で動く)。
+# API キーはここに書かない(秘密の値として登録する):
+#   npx wrangler secret put ANTHROPIC_API_KEY
+# 公開:このフォルダで `npm run deploy`。表示された URL を、リポジトリ直下の config.js の CHAT_URL に入れる。
+# 手順の全体は docs/ai-chat.md
+name = "fp3-chat"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# https://fp3-chat.<あなたのサブドメイン>.workers.dev で受ける。
+# 独自ドメインにするなら、下の行を有効にする(api.kenshin-games.jp は別の Worker が使っているので別の名前で)
+workers_dev = true
+# routes = [{ pattern = "fp3-api.kenshin-games.jp", custom_domain = true }]
+
+[vars]
+# 使うモデル。安くしたいときは "claude-haiku-5-5"(Opus 5.5 のおよそ 1/40 の料金)
+MODEL = "claude-opus-5-5"
+# 呼び出してよいページ(カンマ区切り)。ローカルで試すときは http://localhost:8000 など
+ALLOWED_ORIGINS = "https://kenshingames.github.io,http://localhost:8000,http://127.0.0.1:8000"
+
+# いたずら対策:同じ IP から 1 分に 8 回まで
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "2001"
+simple = { limit = 8, period = 60 }

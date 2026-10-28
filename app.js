@@ -117,13 +117,189 @@
     setTimeout(function () { el.remove(); }, 800);
   }
 
+  /* ---------- AI に質問(解説を読んでも分からないところを聞く) ---------- */
+  // 送り先は config.js の CHAT_URL(Cloudflare Worker。worker/ フォルダ)。空なら claude.ai を新しいタブで開いて聞く
+  var CHAT_URL = (window.FP3_CONFIG && window.FP3_CONFIG.CHAT_URL) || '';
+  var CHAT_MAX_TURNS = 12;    // 送る会話は 6 往復まで(Worker 側の上限と同じ)
+  var CHAT_MAX_CHARS = 500;   // 質問 1 回の長さ(Worker 側の上限と同じ)
+  var CLAUDE_PREFILL_MAX = 1500;   // claude.ai に渡す文の長さ(URL が長くなりすぎないように)
+  var SUGGEST = ['もっとかんたんに説明して', 'ほかの選択肢はなぜ違うの?', '覚え方のコツを教えて'];
+  var chats = {};             // 問題ごとの会話。ページを開いている間だけ覚えておく
+
+  function askButton(it, picked) {
+    return h('button', { class: 'askbtn', onclick: function () { openChat(it, picked); } }, ['💬 AIに質問する(分からないところを聞く)']);
+  }
+
+  function problemOf(it, picked) {
+    var q = it.q;
+    return {
+      field: fieldById[q.f].name, question: q.q, choices: it.labels, correct: it.labels[it.correct],
+      picked: picked == null ? null : it.labels[picked], explanation: q.e, caseText: q.jitsu ? q.ctx : undefined
+    };
+  }
+
+  // claude.ai の入力欄に入れる文(問題・答え・解説・質問)。長い解説は後ろを切る
+  function claudePrompt(p, question) {
+    var head = 'FP3級の勉強中です。次の練習問題の解説を読みましたが、分からないところがあります。やさしく教えてください。\n\n';
+    var body = (p.caseText ? '【事例】\n' + p.caseText + '\n\n' : '') + '【問題】' + p.question + '\n【選択肢】' + p.choices.join(' / ') +
+      '\n【正解】' + p.correct + (p.picked ? '\n【私の答え】' + p.picked : '');
+    var tail = '\n\n【質問】' + question;
+    var room = CLAUDE_PREFILL_MAX - head.length - body.length - tail.length - 10;
+    var exp = room > 80 ? '\n【解説】' + (p.explanation.length > room ? p.explanation.slice(0, room) + '…' : p.explanation) : '';
+    return (head + body + exp + tail).slice(0, CLAUDE_PREFILL_MAX + 200);
+  }
+
+  function openChat(it, picked) {
+    var q = it.q;
+    var problem = problemOf(it, picked);
+    var log = chats[q.id] || (chats[q.id] = []);
+    var busy = null;   // 返事を待っている間の AbortController
+
+    var list = h('div', { class: 'chatlog', 'aria-live': 'polite' });
+    var input = h('textarea', { rows: '2', maxlength: String(CHAT_MAX_CHARS), placeholder: '例:「なぜ 1/2 をかけるの?」' });
+    var sendBtn = h('button', { class: 'btn main sendbtn', onclick: function () { send(input.value); } }, ['送信']);
+    var chips = h('div', { class: 'chips' }, SUGGEST.map(function (t) {
+      return h('button', { class: 'chip', onclick: function () { send(t); } }, [t]);
+    }));
+    var note = CHAT_URL
+      ? 'AIの答えはまちがえることがあります。大事な数値は公式テキストで確かめてください。'
+      : '送信すると Claude(claude.ai)が新しいタブで開き、この問題と質問が入力された状態になります(Claude のアカウントが必要です)。';
+
+    function bubble(role, text) {
+      var b = h('div', { class: 'msg ' + (role === 'user' ? 'me' : 'ai') }, [text]);
+      list.appendChild(b);
+      list.scrollTop = list.scrollHeight;
+      return b;
+    }
+    log.forEach(function (m) { bubble(m.role, m.content); });
+    if (!log.length) list.appendChild(h('div', { class: 'chatempty' }, ['この問題について、分からないところを気軽に聞いてください。下のボタンからも選べます。']));
+
+    function setBusy(b) {
+      busy = b;
+      sendBtn.disabled = !!b;
+      chips.querySelectorAll('button').forEach(function (c) { c.disabled = !!b; });
+    }
+
+    function send(text) {
+      text = (text || '').trim().slice(0, CHAT_MAX_CHARS);
+      if (!text || busy) return;
+      if (!CHAT_URL) {
+        window.open('https://claude.ai/new?q=' + encodeURIComponent(claudePrompt(problem, text)), '_blank', 'noopener');
+        input.value = '';
+        return;
+      }
+      var empty = list.querySelector('.chatempty');
+      if (empty) empty.remove();
+      log.push({ role: 'user', content: text });
+      bubble('user', text);
+      input.value = '';
+      var out = bubble('assistant', '');
+      out.classList.add('wait');
+      out.textContent = '考え中…';
+      var answer = '';
+      var ctrl = new AbortController();
+      setBusy(ctrl);
+
+      function fail(msg) {
+        log.pop();   // 返事がなかった質問は会話に残さない(送り直せるように入力欄へ戻す)
+        if (!input.value) input.value = text;
+        out.classList.remove('wait');
+        out.classList.add('err');
+        out.textContent = (answer ? answer + '\n\n' : '') + '⚠ ' + msg;
+        list.scrollTop = list.scrollHeight;
+      }
+
+      fetch(CHAT_URL, {
+        method: 'POST', signal: ctrl.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ problem: problem, messages: log.slice(-(CHAT_MAX_TURNS - 1)) })
+      }).then(function (res) {
+        if (res.status === 429) throw new Error('too_many');
+        if (!res.ok || !res.body) throw new Error('http_' + res.status);
+        var reader = res.body.getReader(), dec = new TextDecoder(), buf = '', stop = null, error = null;
+        function onLine(line) {
+          if (!line.trim()) return;
+          var ev = JSON.parse(line);
+          if (ev.t === 'text') {
+            if (!answer) { out.classList.remove('wait'); }
+            answer += ev.v;
+            out.textContent = answer.replace(/\*\*/g, '');
+            list.scrollTop = list.scrollHeight;
+          } else if (ev.t === 'done') stop = ev.stop;
+          else if (ev.t === 'error') error = ev.code;
+        }
+        function pump() {
+          return reader.read().then(function (r) {
+            if (!r.done) {
+              buf += dec.decode(r.value, { stream: true });
+              var lines = buf.split('\n');
+              buf = lines.pop();
+              lines.forEach(onLine);
+              return pump();
+            }
+            onLine(buf);
+            if (error) throw new Error(error);
+            if (stop === 'refusal' || !answer) throw new Error('refusal');
+            if (stop === 'max_tokens') { answer += '\n\n(長くなったので途中で切れました。続きは「続けて」と聞いてください)'; out.textContent = answer.replace(/\*\*/g, ''); }
+            log.push({ role: 'assistant', content: answer.slice(0, 3000) });
+          });
+        }
+        return pump();
+      }).catch(function (err) {
+        var code = err && err.message;
+        if (err && err.name === 'AbortError') { log.pop(); out.remove(); return; }
+        fail(code === 'too_many' ? '質問が続いたので、少し待ってからもう一度送ってください。'
+          : code === 'busy' ? 'AIが混み合っています。少し待ってからもう一度送ってください。'
+          : code === 'refusal' ? 'この質問にはお答えできませんでした。聞き方を変えてみてください。'
+          : 'うまく答えを受け取れませんでした。通信の状態を確かめて、もう一度送ってください。');
+      }).then(function () { setBusy(null); });
+    }
+
+    function close() {
+      if (busy) busy.abort();
+      wrapEl.remove();
+      document.body.style.overflow = '';
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+    }
+    input.addEventListener('keydown', function (e) {
+      // Enter で送信、Shift + Enter で改行(日本語の変換を確定する Enter では送らない)
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); send(input.value); }
+    });
+
+    var sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'AIに質問' }, [
+      h('div', { class: 'sheethead' }, [
+        h('b', null, ['💬 AIに質問']),
+        h('span', { class: 'grow' }),
+        h('button', { class: 'back', onclick: close, 'aria-label': '閉じる' }, ['閉じる ✕'])
+      ]),
+      h('div', { class: 'sheetq' }, [q.jitsu ? '事例:' + q.ctitle + ' / ' : '', q.q]),
+      list,
+      chips,
+      h('div', { class: 'chatform' }, [input, sendBtn]),
+      h('div', { class: 'hint' }, [note])
+    ]);
+    var wrapEl = h('div', { class: 'sheet-wrap', onclick: function (e) { if (e.target === wrapEl) close(); } }, [sheet]);
+    document.body.appendChild(wrapEl);
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKey);
+    list.scrollTop = list.scrollHeight;
+    setTimeout(function () { input.focus(); }, 50);
+  }
+
   /* ---------- 出題セッション ---------- */
   var run = null;
   var keyHandler = null;
   function setKeys(fn) {
     if (keyHandler) document.removeEventListener('keydown', keyHandler);
-    keyHandler = fn;
-    if (fn) document.addEventListener('keydown', fn);
+    // AI に質問している間・文字を入力している間は、画面のキー操作(Enter で次へ など)を止める
+    keyHandler = fn && function (e) {
+      if (document.querySelector('.sheet-wrap') || /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+      fn(e);
+    };
+    if (keyHandler) document.addEventListener('keydown', keyHandler);
   }
 
   // 選択肢を並べて、1 問分の表示データにする(○× は並び固定)
@@ -228,7 +404,7 @@
     card.appendChild(list);
     wrap.appendChild(card);
 
-    wrap.appendChild(h('div', { class: 'card exp' }, [h('h3', null, ['解説']), h('p', null, [q.e])]));
+    wrap.appendChild(h('div', { class: 'card exp' }, [h('h3', null, ['解説']), h('p', null, [q.e]), askButton(it, picked)]));
     // 画面下に固定(解説が長くてスクロールしても動かない)
     wrap.classList.add('has-dock');
     wrap.appendChild(h('div', { class: 'dock' }, [
@@ -339,7 +515,7 @@
           h('div', { class: 'ans' }, [h('span', { class: 'mine' }, ['あなたの答え:' + mine])]),
           h('div', { class: 'ans' }, [h('span', { class: 'right' }, ['正解:' + x.it.labels[x.it.correct]])]),
           h('details', { class: 'rv' }, [h('summary', null, ['解説を見る']),
-            h('div', { class: 'exp' }, [h('p', null, [q.e])])])
+            h('div', { class: 'exp' }, [h('p', null, [q.e]), askButton(x.it, x.pick)])])
         ]));
       });
     }
@@ -355,7 +531,7 @@
             h('span', { class: 'tag' }, [fieldById[x.it.q.f].short]),
             h('div', { class: 'qtext' }, [x.it.q.q]),
             h('div', { class: 'ans' }, [h('span', { class: 'right' }, ['⭕ ' + x.it.labels[x.it.correct]])]),
-            h('details', { class: 'rv' }, [h('summary', null, ['解説を見る']), h('div', { class: 'exp' }, [h('p', null, [x.it.q.e])])])
+            h('details', { class: 'rv' }, [h('summary', null, ['解説を見る']), h('div', { class: 'exp' }, [h('p', null, [x.it.q.e]), askButton(x.it, x.pick)])])
           ]));
         });
         wrap.appendChild(ov);
