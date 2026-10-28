@@ -116,7 +116,8 @@ function workersAiError(err: unknown): string {
 }
 
 class ProviderError extends Error {
-  constructor(public code: string, cause: unknown) {
+  /** sample … 答えが読み取れなかったときの、届いたデータの先頭(形の確認用。モデルの出力だけで秘密は含まない) */
+  constructor(public code: string, cause: unknown, public sample?: string) {
     super(cause instanceof Error ? cause.message : String(cause));
   }
 }
@@ -172,12 +173,15 @@ async function* fromWorkersAi(env: Env, system: string[], turns: Turn[], signal:
   signal.addEventListener('abort', () => reader.cancel().catch(() => {}));
   let buf = '';
   let stop: string | null = null;
+  let sample = '';
+  let got = false;
   const think = { inside: false, pending: '' };
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += value;
+      if (sample.length < 600) sample += value.slice(0, 600 - sample.length);
       const lines = buf.split('\n');
       buf = lines.pop() ?? '';
       for (const line of lines) {
@@ -190,7 +194,7 @@ async function* fromWorkersAi(env: Env, system: string[], turns: Turn[], signal:
         if (choice?.finish_reason) stop = choice.finish_reason === 'length' ? 'max_tokens' : 'end_turn';
         if (typeof piece === 'string' && piece) {
           const text = dropThinking(think, piece);
-          if (text) yield text;
+          if (text) { got = true; yield text; }
         }
       }
     }
@@ -198,7 +202,8 @@ async function* fromWorkersAi(env: Env, system: string[], turns: Turn[], signal:
     throw new ProviderError(workersAiError(err), err);
   }
   const rest = think.inside ? '' : think.pending;
-  if (rest) yield rest;
+  if (rest) { got = true; yield rest; }
+  if (!got) throw new ProviderError('empty', '答えが読み取れなかった', sample);
   return stop ?? 'end_turn';
 }
 
@@ -267,7 +272,8 @@ export default {
         ctrl.abort();
         const code = err instanceof ProviderError ? err.code : 'failed';
         console.log('chat error', code, err instanceof Error ? err.message : String(err));
-        await send({ t: 'error', code }).catch(() => {});
+        const sample = err instanceof ProviderError ? err.sample : undefined;
+        await send({ t: 'error', code, sample }).catch(() => {});
       } finally {
         await writer.close().catch(() => {});
       }

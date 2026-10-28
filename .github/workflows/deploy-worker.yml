@@ -44,4 +44,14 @@ jobs:
       - name: 型チェック
         run: npx tsc --noEmit -p .
       - name: 公開
-        run: npx wrangler deploy
+        run: npx wrangler deploy | tee deploy.log
+      - name: 動作確認(試しに 1 回質問して、答えが返るか)
+        run: |
+          url=$(grep -o 'https://[a-z0-9.-]*\.workers\.dev' deploy.log | head -1)
+          echo "URL: $url"
+          cat > smoke.json <<'JSON'
+          {"problem":{"field":"タックスプランニング","question":"勤続30年・退職金2,500万円のとき、退職所得の金額はいくらか。","choices":["500万円","1,000万円","2,500万円","1,250万円"],"correct":"500万円","picked":"1,000万円","explanation":"退職所得 = (退職金 − 退職所得控除額)× 1/2 = (2,500万円 − 1,500万円)× 1/2 = 500万円"},"messages":[{"role":"user","content":"なぜ2分の1にするの?"}]}
+          JSON
+          out=$(curl -sS -m 90 -X POST "$url/chat" -H 'Origin: https://kenshingames.github.io' -H 'Content-Type: application/json' --data @smoke.json)
+          echo "$out"
+          echo "$out" | grep -q '"t":"done"' || { echo "::error::答えが最後まで返ってこなかった"; exit 1; }
