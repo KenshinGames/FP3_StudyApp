@@ -19,6 +19,22 @@
 
 ## 公開の手順(はじめの 1 回)
 
+### iPhone だけでやる(GitHub Actions で公開)
+
+1. Cloudflare のダッシュボード → 右上の人のアイコン → **My Profile** → **API Tokens** → **Create Token** →
+   テンプレート **Edit Cloudflare Workers** の **Use template** → Account Resources で自分のアカウント、
+   Zone Resources は **All zones** → **Continue to summary** → **Create Token** → 表示されたトークンをコピー(一度しか表示されない)
+2. Cloudflare のダッシュボードのトップ(アカウントのホーム)で **Account ID** をコピー
+3. GitHub の FP3_StudyApp → **Settings** → **Secrets and variables** → **Actions** → **New repository secret** で 2 つ登録
+   - `CLOUDFLARE_API_TOKEN` … 1. のトークン
+   - `CLOUDFLARE_ACCOUNT_ID` … 2. の Account ID
+4. GitHub の **Actions** → **Worker を公開** → **Run workflow**。終わると、ログの最後に `https://fp3-chat.<サブドメイン>.workers.dev` が出る
+   (workers.dev のサブドメインが未登録というエラーなら、Cloudflare の Workers & Pages の画面で登録してからもう一度)
+
+以後は、`worker/` を変えて main に push するたびに自動で公開されます。
+
+### Mac でやる
+
 ```bash
 cd worker
 npm install

@@ -1,0 +1,47 @@
+# 「AIに質問」の Worker(worker/)を Cloudflare に公開する。Mac がなくても、GitHub の上で動く。
+# 必要なリポジトリの Secrets(Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN  … Cloudflare の API トークン(テンプレート「Edit Cloudflare Workers」で作る)
+#   CLOUDFLARE_ACCOUNT_ID … Cloudflare のアカウント ID
+# 動くとき:Actions の画面から手動で(Run workflow)/ main の worker/ が変わったとき
+name: Worker を公開
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['worker/**', '.github/workflows/deploy-worker.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Secrets が登録されているか
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::CLOUDFLARE_API_TOKEN と CLOUDFLARE_ACCOUNT_ID をリポジトリの Secrets に登録してください"
+            exit 1
+          fi
+      - run: npm ci
+      - name: 型チェック
+        run: npx tsc --noEmit -p .
+      - name: 公開
+        run: npx wrangler deploy
